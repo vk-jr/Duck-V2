@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+
+  /* Brand electric yellow-green accent */
+  --color-brand-50: #f7fee7;
+  --color-brand-100: #ecfccb;
+  --color-brand-200: #d9f99d;
+  --color-brand-300: #bef264;
+  --color-brand-400: #a3e635;
+  --color-brand-500: #84cc16;
+  --color-brand-600: #65a30d;
+  --color-brand-700: #4d7c0f;
+  --color-brand-800: #3f6212;
+  --color-brand-900: #365314;
+  --color-brand-950: #1a2e05;
+}
+
+/* ── Light theme (default) ──────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-subtle: #f9fafb;
+  --bg-muted: #f3f4f6;
+  --border: #e5e7eb;
+  --border-subtle: #f3f4f6;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --text-subtle: #9ca3af;
+  --accent: #84cc16;
+  --accent-hover: #65a30d;
+  --accent-fg: #1a2e05;
+  --sidebar-bg: #f9fafb;
+  --sidebar-border: #e5e7eb;
+  --sidebar-active-bg: #ecfccb;
+  --sidebar-active-text: #365314;
+  --card-bg: #ffffff;
+  --card-border: #e5e7eb;
+  --input-bg: #ffffff;
+  --input-border: #d1d5db;
+  --input-focus: #84cc16;
+}
+
+/* ── Dark theme ─────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-subtle: #111111;
+  --bg-muted: #1a1a1a;
+  --border: #262626;
+  --border-subtle: #1a1a1a;
+  --text: #fafafa;
+  --text-muted: #a3a3a3;
+  --text-subtle: #525252;
+  --accent: #a3e635;
+  --accent-hover: #bef264;
+  --accent-fg: #1a2e05;
+  --sidebar-bg: #0d0d0d;
+  --sidebar-border: #1f1f1f;
+  --sidebar-active-bg: #1a2e05;
+  --sidebar-active-text: #bef264;
+  --card-bg: #111111;
+  --card-border: #262626;
+  --input-bg: #111111;
+  --input-border: #333333;
+  --input-focus: #a3e635;
+}
+
+/* ── Brand theme (electric yellow-green) ───────────────────────── */
+[data-theme="brand"] {
+  --bg: #0d1a00;
+  --bg-subtle: #111f00;
+  --bg-muted: #162600;
+  --border: #2d4700;
+  --border-subtle: #1f3300;
+  --text: #f0fde4;
+  --text-muted: #a3e635;
+  --text-subtle: #65a30d;
+  --accent: #bef264;
+  --accent-hover: #d9f99d;
+  --accent-fg: #0d1a00;
+  --sidebar-bg: #0a1400;
+  --sidebar-border: #1f3300;
+  --sidebar-active-bg: #1a2e05;
+  --sidebar-active-text: #d9f99d;
+  --card-bg: #111f00;
+  --card-border: #2d4700;
+  --input-bg: #0d1a00;
+  --input-border: #2d4700;
+  --input-focus: #bef264;
+}
+
+/* ── Base styles ────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-subtle);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-subtle);
+}

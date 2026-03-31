@@ -1,0 +1,12 @@
+{
+  "name": "duck",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:worker": "pnpm --filter worker dev",
+    "build:web": "pnpm --filter web build",
+    "build:worker": "pnpm --filter worker build",
+    "lint": "pnpm --filter web lint"
+  }
+}
