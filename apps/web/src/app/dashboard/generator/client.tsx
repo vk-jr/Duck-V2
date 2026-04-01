@@ -27,11 +27,16 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
   const [isPending, startTransition] = useTransition();
   const channelRef = useRef<ReturnType<typeof createClient>["channel"] | null>(null);
 
-  // Subscribe to realtime when we have a generatedImageId
+  // Subscribe to realtime when we have a generatedImageId and add a polling fallback
   useEffect(() => {
     if (!generatedImageId) return;
 
     const supabase = createClient();
+    
+    // Declare interval id so both realtime and polling can clear it
+    let intervalId: ReturnType<typeof setInterval>;
+
+    // 1. Realtime subscription
     const channel = supabase
       .channel(`gen-${generatedImageId}`)
       .on(
@@ -49,16 +54,46 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
           if (row.status === "completed" && row.image_url) {
             setImageUrls(parseImageUrls(row.image_url));
             supabase.removeChannel(channel);
+            if (intervalId) clearInterval(intervalId);
           }
           if (row.status === "failed") {
             setError(row.error_message ?? "Generation failed");
             supabase.removeChannel(channel);
+            if (intervalId) clearInterval(intervalId);
           }
         }
       )
       .subscribe();
 
+    // 2. Polling fallback (every 3 seconds) incase realtime drops during long generations
+    intervalId = setInterval(async () => {
+      const { data, error } = await supabase
+        .from("generated_images")
+        .select("status, image_url, error_message")
+        .eq("id", generatedImageId)
+        .single();
+
+      if (!error && data) {
+        // Only update state if it's practically finished or we're somehow out of sync
+        if (data.status === "completed" && data.image_url) {
+          setGenStatus("completed");
+          setImageUrls(parseImageUrls(data.image_url));
+          clearInterval(intervalId);
+          supabase.removeChannel(channel);
+        } else if (data.status === "failed") {
+          setGenStatus("failed");
+          setError(data.error_message ?? "Generation failed");
+          clearInterval(intervalId);
+          supabase.removeChannel(channel);
+        } else {
+          // just sync the pending/generating status in case we missed it
+          setGenStatus(data.status as typeof genStatus);
+        }
+      }
+    }, 3000);
+
     return () => {
+      clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
   }, [generatedImageId]);
