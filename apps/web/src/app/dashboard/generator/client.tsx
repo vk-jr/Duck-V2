@@ -6,6 +6,7 @@ import { startGeneration } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
+import { FileUpload } from "@/components/ui/file-upload";
 import { ImageCard } from "@/components/ui/image-card";
 import { Spinner } from "@/components/ui/spinner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +25,7 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [genStatus, setGenStatus] = useState<"idle" | "pending" | "generating" | "completed" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [inputFile, setInputFile] = useState<File | null>(null);
   const [isPending, startTransition] = useTransition();
   const channelRef = useRef<ReturnType<typeof createClient>["channel"] | null>(null);
 
@@ -106,6 +108,7 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
     setGenStatus("pending");
 
     const formData = new FormData(e.currentTarget);
+    if (inputFile) formData.set("inputImage", inputFile);
     startTransition(async () => {
       const result = await startGeneration(formData);
       if (!result.success) {
@@ -142,6 +145,15 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
       {/* Left panel — controls */}
       <div className="w-80 flex-shrink-0">
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <FileUpload
+            label="Optional: Upload a product or reference image"
+            multiple={false}
+            maxFiles={1}
+            maxSizeBytes={10 * 1024 * 1024}
+            onFilesChange={(files) => setInputFile(files[0] ?? null)}
+            hint="When provided, FLUX Kontext will reimagine this image in your brand's style"
+          />
+
           <Textarea
             label="Prompt"
             name="prompt"

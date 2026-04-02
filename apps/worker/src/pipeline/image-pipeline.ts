@@ -182,3 +182,34 @@ export interface ReferenceImage {
   style_description: string;
   content_description: string | null;
 }
+
+// ── V3: STEP 3b — img2img (FLUX Kontext) ─────────────────────
+// Used when the user uploads a product/reference image in the Generator.
+// FLUX Kontext reimagines the input image in the style described by the prompt.
+// Steps 1 and 2 (reference finder + mega prompt builder) still run first —
+// their alphaPrompt feeds directly into this function exactly as with txt2img.
+
+export async function generateImagesFromInput(
+  prompt: string,
+  inputImageUrl: string,
+  count: number,
+  aspectRatio: string
+): Promise<string[]> {
+  const promises = Array.from({ length: count }, (_, i) =>
+    runImageModel({
+      model: process.env.MODEL_IMG2IMG!,
+      input: {
+        prompt,
+        input_image: inputImageUrl,
+        aspect_ratio: aspectRatio,
+        output_format: "png",
+        output_quality: 95,
+        seed: Math.floor(Math.random() * 1_000_000) + i,
+      },
+    })
+  );
+
+  const results = await Promise.all(promises);
+  logger.info("img2img images generated", { count, aspectRatio });
+  return results;
+}

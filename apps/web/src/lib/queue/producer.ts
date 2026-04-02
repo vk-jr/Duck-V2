@@ -4,6 +4,7 @@ import type {
   ImageGenerationJobPayload,
   BrandCreationJobPayload,
   QualityCheckJobPayload,
+  PosterGenerationJobPayload,
 } from "@/types";
 
 let redis: Redis | null = null;
@@ -60,6 +61,16 @@ export async function addQualityCheckJob(
     jobId: payload.qualityCheckId
       ? `qc-${payload.qualityCheckId}`
       : `qc-guidelines-${payload.brandId}-${Date.now()}`,
+  });
+  return job.id!;
+}
+
+export async function addPosterGenerationJob(
+  payload: PosterGenerationJobPayload
+): Promise<string> {
+  const queue = getQueue("poster-generation");
+  const job = await queue.add("generate-poster", payload, {
+    jobId: `poster-${payload.posterId}`,
   });
   return job.id!;
 }

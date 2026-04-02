@@ -48,6 +48,43 @@ export async function startGeneration(
 
   const { brandId, prompt, imageCount, aspectRatio, resolution } = parsed.data;
 
+  // V3: optional input image for img2img
+  const inputImageFile = formData.get("inputImage") as File | null;
+  let inputImageUrl: string | undefined;
+
+  if (inputImageFile && inputImageFile.size > 0) {
+    if (!inputImageFile.type.startsWith("image/")) {
+      return { success: false, error: "Input image must be an image file" };
+    }
+    if (inputImageFile.size > 10 * 1024 * 1024) {
+      return { success: false, error: "Input image must be under 10MB" };
+    }
+
+    const ext = inputImageFile.name.split(".").pop() ?? "jpg";
+    const storagePath = `${user.id}/${Date.now()}.${ext}`;
+    const buffer = new Uint8Array(await inputImageFile.arrayBuffer());
+
+    const { error: uploadErr } = await service.storage
+      .from("input-images")
+      .upload(storagePath, buffer, { contentType: inputImageFile.type });
+
+    if (uploadErr) {
+      return { success: false, error: "Failed to upload input image" };
+    }
+
+    // input-images is a private bucket — generate a signed URL valid for 1 hour
+    // so Replicate can fetch it during the job. Public URL would return 400.
+    const { data: signedData, error: signedErr } = await service.storage
+      .from("input-images")
+      .createSignedUrl(storagePath, 3600);
+
+    if (signedErr || !signedData?.signedUrl) {
+      return { success: false, error: "Failed to get signed URL for input image" };
+    }
+
+    inputImageUrl = signedData.signedUrl;
+  }
+
   // Verify brand ownership and ready status
   const { data: brand } = await service
     .from("brands")
@@ -73,6 +110,7 @@ export async function startGeneration(
       aspect_ratio: aspectRatio,
       resolution,
       status: "pending",
+      input_image_url: inputImageUrl ?? null,
     })
     .select("id")
     .single();
@@ -97,6 +135,7 @@ export async function startGeneration(
     imageCount: imageCount as 1 | 2 | 4,
     aspectRatio,
     resolution,
+    inputImageUrl,
   });
 
   return { success: true, data: { generatedImageId: genImage.id } };

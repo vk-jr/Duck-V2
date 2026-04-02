@@ -4,6 +4,7 @@ import {
   findBestReferenceImage,
   buildMegaPrompt,
   generateImages,
+  generateImagesFromInput,
   downloadAndStore,
 } from "../pipeline/image-pipeline";
 import { logger } from "../logger";
@@ -16,6 +17,7 @@ interface ImageGenerationJobData {
   imageCount: 1 | 2 | 4;
   aspectRatio: string;
   resolution: string;
+  inputImageUrl?: string; // V3: present for img2img jobs
 }
 
 export async function processImageGeneration(
@@ -29,6 +31,7 @@ export async function processImageGeneration(
     imageCount,
     aspectRatio,
     resolution,
+    inputImageUrl,
   } = job.data;
 
   const logStart = Date.now();
@@ -85,14 +88,15 @@ export async function processImageGeneration(
       brand.system_prompt ?? ""
     );
 
-    // STEP 3: Generate images in parallel
-    logger.info("Step 3: Generating images", { count: imageCount });
-    const replicateUrls = await generateImages(
-      alphaPrompt,
-      imageCount,
-      aspectRatio,
-      resolution
-    );
+    // STEP 3: Generate images — fork on whether a product image was uploaded
+    if (inputImageUrl) {
+      logger.info("Step 3: img2img via FLUX Kontext", { count: imageCount, inputImageUrl });
+    } else {
+      logger.info("Step 3: txt2img via Flux 1.1 Pro", { count: imageCount });
+    }
+    const replicateUrls = inputImageUrl
+      ? await generateImagesFromInput(alphaPrompt, inputImageUrl, imageCount, aspectRatio)
+      : await generateImages(alphaPrompt, imageCount, aspectRatio, resolution);
 
     // STEP 4: Upload to permanent storage
     logger.info("Step 4: Uploading to Supabase Storage");

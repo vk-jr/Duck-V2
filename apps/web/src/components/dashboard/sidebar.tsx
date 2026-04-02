@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   Zap,
+  Layout,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -21,6 +22,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/dashboard/generator", label: "Generator", icon: Wand2 },
   { href: "/dashboard/gallery", label: "Gallery", icon: Images },
+  { href: "/dashboard/poster-studio", label: "Poster Studio", icon: Layout },
   { href: "/dashboard/quality-checker", label: "Quality Checker", icon: ShieldCheck },
   { href: "/dashboard/brands", label: "Brands", icon: Layers },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },

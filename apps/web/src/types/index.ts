@@ -167,6 +167,7 @@ export interface ImageGenerationJobPayload {
   imageCount: ImageCount;
   aspectRatio: AspectRatio;
   resolution: Resolution;
+  inputImageUrl?: string; // V3: present for img2img jobs (FLUX Kontext), absent for txt2img
 }
 
 export interface BrandCreationJobPayload {
@@ -207,4 +208,83 @@ export interface ActionResult<T = void> {
   success?: boolean;
   data?: T;
   error?: string;
+}
+
+// ── V3: Poster Studio ─────────────────────────────────────────
+
+export type PosterFormat =
+  | "square"
+  | "portrait_a4"
+  | "landscape_16_9"
+  | "story_9_16";
+
+export type PosterStatus = "pending" | "generating" | "completed" | "failed";
+
+export type PosterStage = "intent" | "layout" | "background" | "storage";
+
+export const POSTER_DIMENSIONS: Record<PosterFormat, { width: number; height: number }> = {
+  square:         { width: 1080, height: 1080 },
+  portrait_a4:    { width: 794,  height: 1123 },
+  landscape_16_9: { width: 1920, height: 1080 },
+  story_9_16:     { width: 1080, height: 1920 },
+};
+
+export const POSTER_FORMAT_LABELS: Record<PosterFormat, string> = {
+  square:         "Square (1080×1080) — Instagram, LinkedIn",
+  portrait_a4:    "Portrait A4 (794×1123) — Hiring posters, flyers",
+  landscape_16_9: "Landscape 16:9 (1920×1080) — Presentations, banners",
+  story_9_16:     "Story 9:16 (1080×1920) — Instagram / WhatsApp Stories",
+};
+
+export interface PosterTextLayer {
+  id: string;
+  content: string;
+  font_size: number;
+  font_weight: string;
+  color: string;
+  position_x: number;   // percentage of canvas width (0–100)
+  position_y: number;   // percentage of canvas height (0–100)
+  alignment: "left" | "center" | "right";
+  max_width_percent: number;
+}
+
+export interface PosterLayout {
+  dimensions: { width: number; height: number; format: PosterFormat };
+  background_mood: string;
+  text_layers: PosterTextLayer[];
+  overlay_opacity: number;
+}
+
+export interface Poster {
+  id: string;
+  brand_id: string;
+  created_by: string;
+  user_prompt: string;
+  format: PosterFormat;
+  layout_json: PosterLayout | null;
+  background_url: string | null;
+  status: PosterStatus;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface PosterJob {
+  id: string;
+  poster_id: string;
+  bull_job_id: string | null;
+  status: JobStatus;
+  current_stage: PosterStage | null;
+  attempt_count: number;
+  error_details: unknown | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface PosterGenerationJobPayload {
+  posterId: string;
+  userId: string;
+  brandId: string;
+  prompt: string;
+  format: PosterFormat;
 }

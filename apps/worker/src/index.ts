@@ -4,6 +4,7 @@ import { logger } from "./logger";
 import { processImageGeneration } from "./workers/image-generation.worker";
 import { processBrandCreation } from "./workers/brand-creation.worker";
 import { processQualityCheck } from "./workers/quality-check.worker";
+import { processPosterGeneration } from "./workers/poster-generation.worker";
 
 // ── Required Environment Variables ───────────────────────────
 const REQUIRED_ENV_VARS = [
@@ -15,6 +16,11 @@ const REQUIRED_ENV_VARS = [
   "MODEL_STYLE_FINDER",
   "MODEL_PROMPT_BUILDER",
   "MODEL_IMAGE_GEN",
+  "MODEL_IMG2IMG",
+  "MODEL_POSTER_INTENT",
+  "MODEL_POSTER_LAYOUT",
+  "MODEL_POSTER_BG_PROMPT",
+  "MODEL_POSTER_BG_IMAGE",
 ];
 
 function validateEnv(): void {
@@ -41,6 +47,10 @@ const IMAGE_GEN_CONCURRENCY = parseInt(
 );
 const BRAND_CREATION_CONCURRENCY = 3;
 const QUALITY_CHECK_CONCURRENCY = 3;
+const POSTER_CONCURRENCY = parseInt(
+  process.env.POSTER_CONCURRENCY ?? "2",
+  10
+);
 
 // ── Start Workers ─────────────────────────────────────────────
 function startWorkers(): void {
@@ -71,11 +81,21 @@ function startWorkers(): void {
     }
   );
 
+  const posterGenerationWorker = new Worker(
+    "poster-generation",
+    processPosterGeneration,
+    {
+      connection: redis,
+      concurrency: POSTER_CONCURRENCY,
+    }
+  );
+
   // ── Worker Event Handlers ─────────────────────────────────
   for (const worker of [
     imageGenerationWorker,
     brandCreationWorker,
     qualityCheckWorker,
+    posterGenerationWorker,
   ]) {
     worker.on("completed", (job) => {
       logger.info("Job completed", { queue: worker.name, jobId: job.id });
@@ -100,6 +120,7 @@ function startWorkers(): void {
       "image-generation": { concurrency: IMAGE_GEN_CONCURRENCY },
       "brand-creation": { concurrency: BRAND_CREATION_CONCURRENCY },
       "quality-check": { concurrency: QUALITY_CHECK_CONCURRENCY },
+      "poster-generation": { concurrency: POSTER_CONCURRENCY },
     },
   });
 }
