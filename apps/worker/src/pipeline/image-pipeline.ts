@@ -213,3 +213,131 @@ export async function generateImagesFromInput(
   logger.info("img2img images generated", { count, aspectRatio });
   return results;
 }
+
+// ── extractBrandGuidelines ────────────────────────────────────
+// Sends all brand reference images to the vision model and extracts
+// structured brand guidelines: colours (with hex), fonts, logo info.
+// Called as a non-fatal Step 3 in brand-creation.worker.ts.
+
+export interface BrandColor {
+  name: string;
+  hex: string;
+  rgb: string;
+}
+
+export interface BrandFont {
+  name: string;
+  role: "primary" | "secondary" | "accent";
+  weights: string[];
+  usage: string;
+}
+
+export interface BrandGuidelines {
+  primary_colors: BrandColor[];
+  secondary_colors: BrandColor[];
+  fonts: BrandFont[];
+  has_logo: boolean;
+  logo_description: string | null;
+  brand_personality: string[];
+}
+
+function extractJsonObject(raw: string): string {
+  // 1. Strip markdown code fences
+  let s = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  // 2. Extract just the outermost { ... } block in case the model added prose
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    s = s.slice(start, end + 1);
+  }
+
+  // 3. Fix trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, "$1");
+
+  // 4. Fix missing commas between consecutive objects/arrays (common model mistake)
+  s = s.replace(/\}\s*\{/g, "},{");
+  s = s.replace(/\]\s*\[/g, "],[");
+  s = s.replace(/\}\s*\[/g, "},[");
+  s = s.replace(/\]\s*\{/g, "],{");
+
+  return s;
+}
+
+export async function extractBrandGuidelines(
+  brandName: string,
+  systemPrompt: string,
+  imageUrls: string[]
+): Promise<BrandGuidelines> {
+  // Build a user message with all reference images + extraction instructions.
+  // The vision model can read exact hex codes if they appear in brand-guide images,
+  // or estimate dominant colours from product/lifestyle photos.
+  const imageContents = imageUrls.map((url) => ({
+    type: "image_url" as const,
+    image_url: { url },
+  }));
+
+  const extractionPrompt = `You are analysing the visual brand identity of "${brandName}".
+
+Study ALL the reference images above and extract the following as JSON.
+
+IMPORTANT RULES:
+- For colours: If exact hex or RGB codes are visible in any image (e.g. on a brand guide or colour swatch sheet), read them exactly. Otherwise, identify the 3–5 most dominant/recurring colours from the images and estimate their hex values.
+- For fonts: Identify font names from any visible typography or text. If exact names are not visible, describe the font style (e.g. "Geometric sans-serif, similar to Montserrat").
+- For logos: Note whether a logo mark, wordmark, or icon is present in any image.
+- brand_personality: 3–5 single-word adjectives that describe the brand's visual feel.
+
+Respond with ONLY this JSON structure, no other text:
+{
+  "primary_colors": [
+    { "name": "string", "hex": "#RRGGBB", "rgb": "R, G, B" }
+  ],
+  "secondary_colors": [
+    { "name": "string", "hex": "#RRGGBB", "rgb": "R, G, B" }
+  ],
+  "fonts": [
+    {
+      "name": "string",
+      "role": "primary|secondary|accent",
+      "weights": ["Regular", "Bold"],
+      "usage": "string"
+    }
+  ],
+  "has_logo": true,
+  "logo_description": "string or null",
+  "brand_personality": ["string"]
+}`;
+
+  const response = await chat({
+    model: process.env.MODEL_STYLE_FINDER!,
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt || `You are a professional brand analyst for ${brandName}.`,
+      },
+      {
+        role: "user",
+        content: [
+          ...imageContents,
+          { type: "text" as const, text: extractionPrompt },
+        ],
+      },
+    ],
+    temperature: 0.2,
+    maxTokens: 2500,
+  });
+
+  const guidelines = JSON.parse(extractJsonObject(response.content)) as BrandGuidelines;
+  logger.info("Brand guidelines extracted", {
+    brandName,
+    primaryColors: guidelines.primary_colors?.length,
+    secondaryColors: guidelines.secondary_colors?.length,
+    fonts: guidelines.fonts?.length,
+    hasLogo: guidelines.has_logo,
+  });
+  return guidelines;
+}

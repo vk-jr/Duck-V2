@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 import { supabase, logWorkflow } from "../services/supabase.service";
 import { chat, imageMessage } from "../services/openrouter.service";
+import { extractBrandGuidelines } from "../pipeline/image-pipeline";
 import { logger } from "../logger";
 
 interface BrandCreationJobData {
@@ -53,6 +54,18 @@ export async function processBrandCreation(
   });
 
   try {
+    // Fetch brand — includes existing system_prompt and brand_guidelines
+    // so we can skip steps that already completed on a previous attempt.
+    const { data: brand, error: brandError } = await supabase
+      .from("brands")
+      .select("name, system_prompt, brand_guidelines")
+      .eq("id", brandId)
+      .single();
+
+    if (brandError || !brand) {
+      throw new Error(`Brand not found: ${brandError?.message ?? "empty"}`);
+    }
+
     // Fetch brand images with their numbering to link back
     const { data: brandImages, error: imgError } = await supabase
       .from("brand_images")
@@ -64,13 +77,28 @@ export async function processBrandCreation(
       throw new Error(`No brand images found: ${imgError?.message ?? "empty"}`);
     }
 
-    // STEP 1: Analyse each image in parallel using Gemini Pro Vision
-    logger.info("Analysing brand images in parallel", {
-      count: brandImages.length,
+    // STEP 1: Analyse each image — idempotent on retry.
+    // Load any analyses already stored from a previous attempt so we only
+    // call the vision API for images that haven't been processed yet.
+    const { data: existingRefs } = await supabase
+      .from("reference_images")
+      .select("brand_image_id, content_description, style_description")
+      .eq("brand_id", brandId);
+
+    const cachedByImageId = new Map(
+      (existingRefs ?? []).map((r) => [r.brand_image_id, r])
+    );
+
+    const toAnalyse = brandImages.filter((img) => !cachedByImageId.has(img.id));
+
+    logger.info("Step 1: Analysing brand images", {
+      total: brandImages.length,
+      alreadyCached: brandImages.length - toAnalyse.length,
+      toAnalyse: toAnalyse.length,
     });
 
-    const analysisResults = await Promise.all(
-      brandImages.map(async (img) => {
+    await Promise.all(
+      toAnalyse.map(async (img) => {
         const response = await chat({
           model: process.env.MODEL_STYLE_FINDER!,
           messages: [
@@ -96,14 +124,13 @@ Output ONLY the JSON object, no other text.`,
         try {
           analysis = JSON.parse(response.content) as ImageAnalysis;
         } catch {
-          // Fallback if JSON parsing fails
           analysis = {
             content_description: "Brand reference image",
             style_description: response.content,
           };
         }
 
-        // Store in reference_images table
+        // Insert — if another concurrent retry already stored this, ignore the conflict
         const { error: refError } = await supabase
           .from("reference_images")
           .insert({
@@ -117,55 +144,95 @@ Output ONLY the JSON object, no other text.`,
           });
 
         if (refError) {
-          logger.warn("Failed to insert reference_image", {
+          logger.warn("reference_image insert skipped (duplicate on retry)", {
             brandId,
             imageId: img.id,
             error: refError.message,
           });
         }
 
-        return analysis;
+        // Add to cache so Step 2 can read it
+        cachedByImageId.set(img.id, {
+          brand_image_id: img.id,
+          content_description: analysis.content_description,
+          style_description: analysis.style_description,
+        });
       })
     );
+
+    // Build ordered analysis list from cache (covers both fresh + pre-existing)
+    const analysisResults: ImageAnalysis[] = brandImages.map((img) => {
+      const r = cachedByImageId.get(img.id);
+      return {
+        content_description: r?.content_description ?? "",
+        style_description: r?.style_description ?? "",
+      };
+    });
 
     logger.info("All images analysed", { count: analysisResults.length });
 
     // STEP 2: Synthesise all style descriptions into one master system_prompt
-    const stylesSummary = analysisResults
-      .map(
-        (a, i) =>
-          `Image ${i + 1}:\nContent: ${a.content_description}\nStyle: ${a.style_description}`
-      )
-      .join("\n\n---\n\n");
+    // Skipped on retry if system_prompt was already built in a previous attempt.
+    let masterSystemPrompt = brand.system_prompt ?? "";
+    if (!masterSystemPrompt) {
+      const stylesSummary = analysisResults
+        .map(
+          (a, i) =>
+            `Image ${i + 1}:\nContent: ${a.content_description}\nStyle: ${a.style_description}`
+        )
+        .join("\n\n---\n\n");
 
-    logger.info("Building master system prompt from all styles");
+      logger.info("Step 2: Building master system prompt from all styles");
 
-    const masterResponse = await chat({
-      model: process.env.MODEL_PROMPT_BUILDER!,
-      messages: [
-        {
-          role: "system",
-          content: BRAND_ARCHITECT_SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: `Here are the style analyses of all ${analysisResults.length} brand reference images:\n\n${stylesSummary}\n\nSynthesize these into a comprehensive brand visual identity guide (system prompt).`,
-        },
-      ],
-      temperature: 0.5,
-      maxTokens: 3000,
-    });
+      const masterResponse = await chat({
+        model: process.env.MODEL_PROMPT_BUILDER!,
+        messages: [
+          {
+            role: "system",
+            content: BRAND_ARCHITECT_SYSTEM_PROMPT,
+          },
+          {
+            role: "user",
+            content: `Here are the style analyses of all ${analysisResults.length} brand reference images:\n\n${stylesSummary}\n\nSynthesize these into a comprehensive brand visual identity guide (system prompt).`,
+          },
+        ],
+        temperature: 0.5,
+        maxTokens: 3000,
+      });
 
-    const masterSystemPrompt = masterResponse.content.trim();
+      masterSystemPrompt = masterResponse.content.trim();
+    } else {
+      logger.info("Step 2: Skipping — system_prompt already exists", { brandId });
+    }
 
-    // STEP 3: Update brand with system_prompt and status = 'ready'
+    // STEP 3: Extract structured brand guidelines.
+    // Skipped on retry if guidelines were already extracted in a previous attempt.
+    // Uses the freshly-fetched brandImages URLs (same ones that worked in Step 1).
+    let brandGuidelines = (brand.brand_guidelines as object | null) ?? null;
+    if (!brandGuidelines) {
+      logger.info("Step 3: Extracting brand guidelines", { brandId });
+      const freshImageUrls = brandImages.map((img) => img.image_url);
+      brandGuidelines = await extractBrandGuidelines(
+        brand.name,
+        masterSystemPrompt,
+        freshImageUrls
+      );
+      logger.info("Brand guidelines extracted", { brandId });
+    } else {
+      logger.info("Step 3: Skipping — brand_guidelines already exists", { brandId });
+    }
+
+    // STEP 4: Update brand — only write fields that were actually regenerated this run.
+    const updatePayload: Record<string, unknown> = {
+      status: "ready",
+      updated_at: new Date().toISOString(),
+    };
+    if (!brand.system_prompt) updatePayload.system_prompt = masterSystemPrompt;
+    if (!brand.brand_guidelines) updatePayload.brand_guidelines = brandGuidelines;
+
     const { error: updateError } = await supabase
       .from("brands")
-      .update({
-        system_prompt: masterSystemPrompt,
-        status: "ready",
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", brandId);
 
     if (updateError) {

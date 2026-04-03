@@ -44,11 +44,12 @@ export async function addImageGenerationJob(
 }
 
 export async function addBrandCreationJob(
-  payload: BrandCreationJobPayload
+  payload: BrandCreationJobPayload,
+  jobId?: string
 ): Promise<string> {
   const queue = getQueue("brand-creation");
   const job = await queue.add("create-brand", payload, {
-    jobId: `brand-${payload.brandId}`,
+    jobId: jobId ?? `brand-${payload.brandId}`,
   });
   return job.id!;
 }

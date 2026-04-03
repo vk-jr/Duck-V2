@@ -120,11 +120,14 @@ export async function retryBrandAnalysis(brandId: string): Promise<ActionResult>
     .update({ status: "pending" })
     .eq("id", brandId);
 
-  await addBrandCreationJob({
-    brandId,
-    userId: user.id,
-    imageUrls: brandImages.map((img) => img.image_url),
-  });
+  await addBrandCreationJob(
+    {
+      brandId,
+      userId: user.id,
+      imageUrls: brandImages.map((img) => img.image_url),
+    },
+    `brand-${brandId}-retry-${Date.now()}`
+  );
 
   revalidatePath(`/dashboard/brand/${brandId}`);
   return { success: true };

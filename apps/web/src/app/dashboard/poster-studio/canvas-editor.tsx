@@ -3,13 +3,38 @@
 import { useEffect, useRef } from "react";
 import type { PosterLayout } from "@/types";
 
-// Fabric.js is imported at runtime only — this file must be dynamically imported
-// with ssr: false in client.tsx because fabric requires window.
+// Fabric.js requires window — dynamically imported with ssr: false in client.tsx
 
 interface PosterCanvasProps {
   layout: PosterLayout;
   backgroundUrl: string;
   posterId: string;
+}
+
+// Load a Google Font via CSS injection + FontFaceSet API.
+// Runs before canvas render so Fabric can use the font immediately.
+async function loadGoogleFont(family: string, weight: string): Promise<void> {
+  const weightMap: Record<string, string> = {
+    normal: "400",
+    semibold: "600",
+    bold: "700",
+  };
+  const cssWeight = weightMap[weight] ?? "700";
+  const linkId = `gf-${family.replace(/\s+/g, "-")}-${cssWeight}`;
+
+  if (!document.getElementById(linkId)) {
+    const link = document.createElement("link");
+    link.id = linkId;
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${cssWeight}&display=swap`;
+    document.head.appendChild(link);
+  }
+
+  try {
+    await document.fonts.load(`${cssWeight} 16px "${family}"`);
+  } catch {
+    // Non-fatal — Fabric falls back to system fonts
+  }
 }
 
 export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasProps) {
@@ -23,23 +48,33 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
     let disposed = false;
 
     async function init() {
-      const { Canvas, FabricImage, Rect, Textbox } = await import("fabric");
+      const { Canvas, FabricImage, Rect, Textbox, Shadow, Gradient } =
+        await import("fabric");
 
       if (disposed || !canvasRef.current) return;
 
       const canvas = new Canvas(canvasRef.current, { width, height, selection: true });
       fabricRef.current = canvas;
 
-      // Background image — scale to fill the full canvas exactly
+      // Pre-load all Google Fonts referenced in text layers (in parallel)
+      await Promise.all(
+        layout.text_layers.map((layer) =>
+          loadGoogleFont(layer.font_family || "Inter", layer.font_weight)
+        )
+      );
+      if (disposed) return;
+
+      // Background image — stretched to fill canvas exactly
       try {
-        const bgImg = await FabricImage.fromURL(backgroundUrl, { crossOrigin: "anonymous" });
+        const bgImg = await FabricImage.fromURL(backgroundUrl, {
+          crossOrigin: "anonymous",
+        });
         if (!disposed) {
           bgImg.set({
             left: 0,
             top: 0,
             originX: "left",
             originY: "top",
-            // Stretch to cover the full canvas regardless of source dimensions
             scaleX: width / (bgImg.width ?? width),
             scaleY: height / (bgImg.height ?? height),
             selectable: false,
@@ -54,23 +89,54 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
 
       if (disposed) return;
 
-      // Dark overlay for text legibility
+      // Overlay — cinematic gradient (transparent top → dark bottom) or flat
+      const overlayStyle = layout.overlay_style ?? "flat";
+      const overlayFill =
+        overlayStyle === "gradient_bottom"
+          ? new Gradient({
+              type: "linear",
+              gradientUnits: "pixels",
+              coords: { x1: 0, y1: 0, x2: 0, y2: height },
+              colorStops: [
+                { offset: 0, color: "rgba(0,0,0,0)" },
+                { offset: 0.45, color: `rgba(0,0,0,${layout.overlay_opacity * 0.3})` },
+                { offset: 1, color: `rgba(0,0,0,${layout.overlay_opacity})` },
+              ],
+            })
+          : `rgba(0,0,0,${layout.overlay_opacity})`;
+
       const overlay = new Rect({
         left: 0,
         top: 0,
         width,
         height,
-        fill: `rgba(0,0,0,${layout.overlay_opacity})`,
+        fill: overlayFill,
         selectable: false,
         evented: false,
       });
       canvas.add(overlay);
 
-      // Text layers — clamp positions to canvas bounds so nothing renders outside
+      // Text layers
       for (const layer of layout.text_layers) {
         const maxWidth = Math.max(50, (layer.max_width_percent / 100) * width);
-        const left = Math.min(Math.max((layer.position_x / 100) * width, maxWidth / 2), width - maxWidth / 2);
-        const top = Math.min(Math.max((layer.position_y / 100) * height, 10), height - 10);
+        const left = Math.min(
+          Math.max((layer.position_x / 100) * width, maxWidth / 2),
+          width - maxWidth / 2
+        );
+        const top = Math.min(
+          Math.max((layer.position_y / 100) * height, 10),
+          height - 10
+        );
+
+        const shadow =
+          (layer.text_shadow ?? false)
+            ? new Shadow({
+                color: "rgba(0,0,0,0.65)",
+                blur: 14,
+                offsetX: 2,
+                offsetY: 3,
+              })
+            : undefined;
 
         const textbox = new Textbox(layer.content, {
           left,
@@ -80,9 +146,12 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
           width: maxWidth,
           fontSize: layer.font_size,
           fontWeight: layer.font_weight,
+          fontFamily: layer.font_family || "Inter",
           fill: layer.color,
           textAlign: layer.alignment as "left" | "center" | "right",
-          fontFamily: "Inter, Arial, sans-serif",
+          charSpacing: layer.letter_spacing ?? 0,
+          lineHeight: layer.line_height ?? 1.2,
+          shadow,
           editable: true,
         });
         canvas.add(textbox);
@@ -110,7 +179,11 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
 
   function exportJpg() {
     if (!fabricRef.current) return;
-    const dataUrl = fabricRef.current.toDataURL({ format: "jpeg", quality: 0.92, multiplier: 2 });
+    const dataUrl = fabricRef.current.toDataURL({
+      format: "jpeg",
+      quality: 0.92,
+      multiplier: 2,
+    });
     downloadFile(dataUrl, `poster-${posterId}.jpg`);
   }
 
@@ -141,10 +214,8 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
 
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* Canvas wrapper
-          position: relative + overflow: hidden on the clip div ensures Fabric's
-          upper-canvas layer (which is position:absolute inside .canvas-container)
-          is clipped correctly even with CSS transform scaling. */}
+      {/* Clip container: position:relative + overflow:hidden ensures Fabric's
+          absolutely-positioned upper-canvas is clipped correctly. */}
       <div className="flex flex-1 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4">
         <div
           style={{
@@ -156,8 +227,8 @@ export function PosterCanvas({ layout, backgroundUrl, posterId }: PosterCanvasPr
             flexShrink: 0,
           }}
         >
-          {/* Full-size canvas scaled down via transform; absolutely positioned
-              so its 1080px DOM footprint doesn't push outside the clip container */}
+          {/* Full-size canvas scaled down; position:absolute keeps its 1080px
+              DOM footprint inside the clip container. */}
           <div
             style={{
               position: "absolute",

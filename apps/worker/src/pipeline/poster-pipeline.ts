@@ -26,11 +26,15 @@ export interface PosterTextLayer {
   content: string;
   font_size: number;
   font_weight: string;
+  font_family: string;
   color: string;
   position_x: number;
   position_y: number;
   alignment: "left" | "center" | "right";
   max_width_percent: number;
+  letter_spacing: number;
+  line_height: number;
+  text_shadow: boolean;
 }
 
 export interface PosterLayout {
@@ -38,6 +42,7 @@ export interface PosterLayout {
   background_mood: string;
   text_layers: PosterTextLayer[];
   overlay_opacity: number;
+  overlay_style: "flat" | "gradient_bottom";
 }
 
 export interface PosterIntent {
@@ -121,6 +126,14 @@ ${JSON.stringify(intent, null, 2)}
 
 CANVAS DIMENSIONS: ${dimensions.width}px × ${dimensions.height}px (format: ${dimensions.format})
 
+AVAILABLE GOOGLE FONTS — choose the most on-brand option per layer:
+  Impact/bold:       "Oswald", "Bebas Neue", "Montserrat"
+  Elegant/editorial: "Playfair Display", "Cormorant Garamond"
+  Modern/clean:      "Poppins", "Raleway", "DM Sans"
+  Body/readable:     "Lato", "Source Sans 3"
+Pick font_family based on layer role and brand tone ("${intent.tone}").
+Headline layers → impact or elegant fonts. Body/CTA → modern or readable fonts.
+
 LAYOUT RULES:
 - Use ONLY the brand's colour palette from your system instructions
 - Headline font_size: 72–120px, font_weight: "bold"
@@ -129,25 +142,35 @@ LAYOUT RULES:
 - Call-to-action font_size: 28–40px, font_weight: "bold"
 - position_x and position_y are percentages of canvas width/height (0–100)
 - max_width_percent is percentage of canvas width (0–100) for text wrapping
-- overlay_opacity: 0.0–0.7 (dark overlay on background image for text legibility)
+- overlay_opacity: 0.3–0.75 (dark overlay for text legibility)
+- overlay_style: "gradient_bottom" for most posters (cinematic depth, transparent top → dark bottom); "flat" only for bright minimal designs
 - background_mood: describe a PURE VISUAL scene with NO text, NO words, NO typography, NO letters
+- font_family: MUST be one of the exact font names listed above — no other values allowed
+- letter_spacing: 0–20 for body text; 50–200 for headlines and CTA (Fabric charSpacing units)
+- line_height: 1.0–1.3 for headlines; 1.4–1.8 for body text (multiplier)
+- text_shadow: true for headline and CTA layers; false for body/subheadline layers
 
 Respond with ONLY a JSON object matching this schema exactly:
 {
   "dimensions": { "width": number, "height": number, "format": string },
   "background_mood": "string (visual description, absolutely no text in image)",
   "overlay_opacity": number,
+  "overlay_style": "flat|gradient_bottom",
   "text_layers": [
     {
       "id": "string",
       "content": "string",
       "font_size": number,
       "font_weight": "normal|semibold|bold",
+      "font_family": "string (exact name from font catalogue)",
       "color": "#hexcolor",
       "position_x": number,
       "position_y": number,
       "alignment": "left|center|right",
-      "max_width_percent": number
+      "max_width_percent": number,
+      "letter_spacing": number,
+      "line_height": number,
+      "text_shadow": boolean
     }
   ]
 }`,
@@ -155,7 +178,7 @@ Respond with ONLY a JSON object matching this schema exactly:
     ],
     responseFormat: { type: "json_object" },
     temperature: 0.5,
-    maxTokens: 1500,
+    maxTokens: 2000,
   });
 
   const layout = parseJsonResponse<PosterLayout>(response.content);

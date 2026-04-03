@@ -54,7 +54,7 @@ export interface Brand {
   name: string;
   created_by: string;
   system_prompt: string | null;
-  brand_guidelines: string | null;
+  brand_guidelines: BrandGuidelines | null;
   status: BrandStatus;
   created_at: string;
   updated_at: string;
@@ -202,6 +202,30 @@ export interface QualityCheckWithBrand extends QualityCheck {
   brand: Pick<Brand, "id" | "name"> | null;
 }
 
+// ── Brand Guidelines ─────────────────────────────────────────
+
+export interface BrandColor {
+  name: string;   // "Electric Yellow"
+  hex: string;    // "#F9FF49"
+  rgb: string;    // "249, 255, 73"
+}
+
+export interface BrandFont {
+  name: string;                               // "Space Grotesk"
+  role: "primary" | "secondary" | "accent";
+  weights: string[];                          // ["Regular", "Medium", "Semibold", "Bold"]
+  usage: string;                              // "Headlines, UI elements"
+}
+
+export interface BrandGuidelines {
+  primary_colors: BrandColor[];
+  secondary_colors: BrandColor[];
+  fonts: BrandFont[];
+  has_logo: boolean;
+  logo_description: string | null;
+  brand_personality: string[];
+}
+
 // ── Server Action Response ────────────────────────────────────
 
 export interface ActionResult<T = void> {
@@ -241,11 +265,15 @@ export interface PosterTextLayer {
   content: string;
   font_size: number;
   font_weight: string;
+  font_family: string;          // Google Font name from curated list
   color: string;
-  position_x: number;   // percentage of canvas width (0–100)
-  position_y: number;   // percentage of canvas height (0–100)
+  position_x: number;           // percentage of canvas width (0–100)
+  position_y: number;           // percentage of canvas height (0–100)
   alignment: "left" | "center" | "right";
   max_width_percent: number;
+  letter_spacing: number;       // Fabric charSpacing (0–500)
+  line_height: number;          // Fabric lineHeight multiplier (1.0–2.0)
+  text_shadow: boolean;         // drop shadow on this layer
 }
 
 export interface PosterLayout {
@@ -253,6 +281,7 @@ export interface PosterLayout {
   background_mood: string;
   text_layers: PosterTextLayer[];
   overlay_opacity: number;
+  overlay_style: "flat" | "gradient_bottom";
 }
 
 export interface Poster {
