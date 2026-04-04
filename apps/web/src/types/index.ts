@@ -234,7 +234,7 @@ export interface ActionResult<T = void> {
   error?: string;
 }
 
-// ── V3: Poster Studio ─────────────────────────────────────────
+// ── V4: Poster Studio ─────────────────────────────────────────
 
 export type PosterFormat =
   | "square"
@@ -244,7 +244,13 @@ export type PosterFormat =
 
 export type PosterStatus = "pending" | "generating" | "completed" | "failed";
 
-export type PosterStage = "intent" | "layout" | "background" | "storage";
+export type PosterStage =
+  | "generating"
+  | "segmenting"
+  | "analysing"
+  | "designing"
+  | "background"
+  | "finishing";
 
 export const POSTER_DIMENSIONS: Record<PosterFormat, { width: number; height: number }> = {
   square:         { width: 1080, height: 1080 },
@@ -265,23 +271,51 @@ export interface PosterTextLayer {
   content: string;
   font_size: number;
   font_weight: string;
-  font_family: string;          // Google Font name from curated list
+  font_family?: string;         // Google Font name (optional — falls back to Inter)
   color: string;
   position_x: number;           // percentage of canvas width (0–100)
   position_y: number;           // percentage of canvas height (0–100)
   alignment: "left" | "center" | "right";
   max_width_percent: number;
-  letter_spacing: number;       // Fabric charSpacing (0–500)
-  line_height: number;          // Fabric lineHeight multiplier (1.0–2.0)
-  text_shadow: boolean;         // drop shadow on this layer
+  letter_spacing?: number;      // Fabric charSpacing (0–500)
+  line_height?: number;         // Fabric lineHeight multiplier (1.0–2.0)
+  text_shadow?: boolean;        // drop shadow on this layer
+}
+
+// Per-layer position/scale defaults set by Claude based on composition analysis
+export interface PosterLayerDefault {
+  layer_index: number;
+  label: string;                // "foreground" | "midground" | "background_strip" etc.
+  position_x: number;          // % of canvas width — centre of layer
+  position_y: number;          // % of canvas height — centre of layer
+  scale: number;               // 0.5–1.5
+  opacity: number;             // 0.0–1.0
+}
+
+export interface PosterBackground {
+  type: "solid_color" | "ai_image";
+  color?: string;              // hex — used when type = "solid_color"
+  background_prompt?: string;  // Flux prompt — used when type = "ai_image"
+  overlay_opacity: number;     // 0 for solid_color; 0.2–0.6 for ai_image
 }
 
 export interface PosterLayout {
   dimensions: { width: number; height: number; format: PosterFormat };
-  background_mood: string;
+  background: PosterBackground;
   text_layers: PosterTextLayer[];
-  overlay_opacity: number;
-  overlay_style: "flat" | "gradient_bottom";
+  layer_stack: {
+    z_order: string[];           // e.g. ["background", "layer_2", "layer_1", "layer_0", "text_layers"]
+    layer_defaults: PosterLayerDefault[];
+  };
+}
+
+// One row from poster_layers table
+export interface PosterImageLayer {
+  id: string;
+  poster_id: string;
+  layer_index: number;
+  layer_url: string;
+  created_at: string;
 }
 
 export interface Poster {
@@ -290,11 +324,14 @@ export interface Poster {
   created_by: string;
   user_prompt: string;
   format: PosterFormat;
+  source_image_url: string | null; // storage path of user-uploaded reference image
   layout_json: PosterLayout | null;
-  background_url: string | null;
+  background_url: string | null;   // null when background.type = "solid_color"
   status: PosterStatus;
   error_message: string | null;
   created_at: string;
+  // Populated by JOIN on poster_layers — sorted by layer_index ascending
+  layer_urls?: string[];
 }
 
 export interface PosterJob {
@@ -316,4 +353,5 @@ export interface PosterGenerationJobPayload {
   brandId: string;
   prompt: string;
   format: PosterFormat;
+  referenceImageUrl?: string; // signed URL for user-uploaded reference image (img2img)
 }

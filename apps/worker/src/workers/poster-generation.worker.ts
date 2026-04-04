@@ -1,11 +1,16 @@
 import type { Job } from "bullmq";
 import { supabase, logWorkflow } from "../services/supabase.service";
+import { downloadAndUpload } from "../services/storage.service";
 import {
-  extractPosterIntent,
+  buildHeroImagePrompt,
+  generateHeroImage,
+  segmentHeroImage,
+  analyseComposition,
   buildPosterLayout,
-  generatePosterBackground,
-  storePosterBackground,
+  generateCanvasBackground,
   type PosterFormat,
+  type PosterLayout,
+  type CompositionAnalysis,
 } from "../pipeline/poster-pipeline";
 import { logger } from "../logger";
 
@@ -15,6 +20,7 @@ interface PosterGenerationJobData {
   brandId: string;
   prompt: string;
   format: PosterFormat;
+  referenceImageUrl?: string;
 }
 
 const POSTER_DIMENSIONS: Record<PosterFormat, { width: number; height: number }> = {
@@ -34,14 +40,17 @@ async function setStage(posterId: string, stage: string): Promise<void> {
 export async function processPosterGeneration(
   job: Job<PosterGenerationJobData>
 ): Promise<void> {
-  const { posterId, userId, brandId, prompt, format } = job.data;
+  const { posterId, userId, brandId, prompt, format, referenceImageUrl } = job.data;
   const logStart = Date.now();
+  const isRetry = job.attemptsMade > 0;
 
   logger.info("Poster generation started", {
     jobId: job.id,
     posterId,
     brandId,
     format,
+    hasReference: !!referenceImageUrl,
+    attempt: job.attemptsMade,
   });
 
   await logWorkflow({
@@ -50,11 +59,10 @@ export async function processPosterGeneration(
     entityType: "posters",
     userId,
     status: "started",
-    metadata: { jobId: job.id, format },
+    metadata: { jobId: job.id, format, hasReference: !!referenceImageUrl, attempt: job.attemptsMade },
   });
 
   try {
-    // Mark as generating
     await supabase
       .from("posters")
       .update({ status: "generating" })
@@ -65,7 +73,7 @@ export async function processPosterGeneration(
       .update({ status: "processing", started_at: new Date().toISOString() })
       .eq("poster_id", posterId);
 
-    // Fetch brand system prompt
+    // Fetch brand
     const { data: brand, error: brandError } = await supabase
       .from("brands")
       .select("system_prompt")
@@ -79,49 +87,146 @@ export async function processPosterGeneration(
     const brandSystemPrompt = brand.system_prompt ?? "";
     const dimensions = POSTER_DIMENSIONS[format];
 
-    // STAGE 1: Extract intent
-    await setStage(posterId, "intent");
-    logger.info("Stage 1: Extracting poster intent", { posterId });
-    const intent = await extractPosterIntent(prompt);
+    // ── Read checkpoint state ────────────────────────────────
+    // On retries, stages that already wrote their output to the DB are skipped.
+    const { data: checkpoint } = await supabase
+      .from("posters")
+      .select("hero_image_url, composition_json, layout_json, background_url")
+      .eq("id", posterId)
+      .single();
 
-    // STAGE 2: Build layout
-    await setStage(posterId, "layout");
-    logger.info("Stage 2: Building poster layout", { posterId });
-    const layout = await buildPosterLayout(intent, brandSystemPrompt, {
-      ...dimensions,
-      format,
-    });
+    const { data: existingLayers } = await supabase
+      .from("poster_layers")
+      .select("layer_index, layer_url")
+      .eq("poster_id", posterId)
+      .order("layer_index");
 
-    // STAGE 3: Generate background image
-    await setStage(posterId, "background");
-    logger.info("Stage 3: Generating poster background", { posterId });
-    const replicateCdnUrl = await generatePosterBackground(
-      layout.background_mood,
-      brandSystemPrompt,
-      dimensions
-    );
+    // ── STAGE 1: Generate hero image ─────────────────────────
+    let heroImageUrl: string;
 
-    // STAGE 4: Upload to permanent storage
-    await setStage(posterId, "storage");
-    logger.info("Stage 4: Storing poster background", { posterId });
-    const permanentUrl = await storePosterBackground(replicateCdnUrl, userId, posterId);
+    if (checkpoint?.hero_image_url) {
+      heroImageUrl = checkpoint.hero_image_url;
+      if (isRetry) logger.info("Stage 1: skipping (already done)", { posterId });
+    } else {
+      await setStage(posterId, "generating");
+      logger.info("Stage 1: Generating hero image", { posterId });
 
-    // Mark as complete
+      const imagePrompt = await buildHeroImagePrompt(
+        prompt,
+        brandSystemPrompt,
+        referenceImageUrl
+      );
+      const replicateUrl = await generateHeroImage(
+        imagePrompt,
+        dimensions,
+        referenceImageUrl
+      );
+
+      // Download from Replicate CDN and store permanently so retries can reuse it
+      const heroPath = `${userId}/${posterId}/hero.png`;
+      heroImageUrl = await downloadAndUpload(
+        replicateUrl,
+        "poster-layers", // public bucket — hero is AI-generated, not user data
+        heroPath,
+        "image/png",
+        true
+      );
+
+      await supabase
+        .from("posters")
+        .update({ hero_image_url: heroImageUrl })
+        .eq("id", posterId);
+    }
+
+    // ── STAGE 2: Qwen segmentation ───────────────────────────
+    let layerUrls: string[];
+
+    if (existingLayers && existingLayers.length > 0) {
+      layerUrls = existingLayers.map((l) => l.layer_url);
+      if (isRetry) logger.info("Stage 2: skipping (already done)", { posterId, layers: layerUrls.length });
+    } else {
+      await setStage(posterId, "segmenting");
+      logger.info("Stage 2: Segmenting hero image", { posterId });
+      layerUrls = await segmentHeroImage(heroImageUrl, userId, posterId);
+    }
+
+    // ── STAGE 3: Composition analysis ───────────────────────
+    let composition: CompositionAnalysis;
+
+    if (checkpoint?.composition_json) {
+      composition = checkpoint.composition_json as CompositionAnalysis;
+      if (isRetry) logger.info("Stage 3: skipping (already done)", { posterId });
+    } else {
+      await setStage(posterId, "analysing");
+      logger.info("Stage 3: Analysing composition", { posterId });
+      composition = await analyseComposition(heroImageUrl);
+
+      await supabase
+        .from("posters")
+        .update({ composition_json: composition })
+        .eq("id", posterId);
+    }
+
+    // ── STAGE 4: Layout & text design ───────────────────────
+    let layout: PosterLayout;
+
+    if (checkpoint?.layout_json) {
+      layout = checkpoint.layout_json as PosterLayout;
+      if (isRetry) logger.info("Stage 4: skipping (already done)", { posterId });
+    } else {
+      await setStage(posterId, "designing");
+      logger.info("Stage 4: Designing poster layout", { posterId });
+      layout = await buildPosterLayout(
+        prompt,
+        composition,
+        brandSystemPrompt,
+        { ...dimensions, format },
+        layerUrls.length
+      );
+
+      await supabase
+        .from("posters")
+        .update({ layout_json: layout })
+        .eq("id", posterId);
+    }
+
+    // ── STAGE 5: Canvas background (conditional) ────────────
+    let backgroundUrl: string | null = null;
+    const needsAiBackground = layout.background?.type === "ai_image";
+
+    if (!needsAiBackground) {
+      // solid_color: nothing to generate
+    } else if (checkpoint?.background_url) {
+      backgroundUrl = checkpoint.background_url;
+      if (isRetry) logger.info("Stage 5: skipping (already done)", { posterId });
+    } else {
+      await setStage(posterId, "background");
+      logger.info("Stage 5: Generating canvas background", { posterId });
+      backgroundUrl = await generateCanvasBackground(
+        layout.background!.background_prompt!,
+        dimensions,
+        userId,
+        posterId
+      );
+
+      await supabase
+        .from("posters")
+        .update({ background_url: backgroundUrl })
+        .eq("id", posterId);
+    }
+
+    // ── STAGE 6: Finalise ────────────────────────────────────
+    await setStage(posterId, "finishing");
+    logger.info("Stage 6: Finishing up", { posterId });
+
     await supabase
       .from("posters")
-      .update({
-        layout_json: layout,
-        background_url: permanentUrl,
-        status: "completed",
-      })
+      .update({ status: "completed" })
       .eq("id", posterId);
 
     await supabase
       .from("poster_jobs")
-      .update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      })
+      .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("poster_id", posterId);
 
     await logWorkflow({
@@ -131,13 +236,20 @@ export async function processPosterGeneration(
       userId,
       status: "completed",
       duration_ms: Date.now() - logStart,
-      metadata: { format, textLayers: layout.text_layers?.length },
+      metadata: {
+        format,
+        textLayers: layout.text_layers?.length,
+        imageLayers: layerUrls.length,
+        backgroundType: layout.background?.type,
+        attempt: job.attemptsMade,
+      },
     });
 
     logger.info("Poster generation completed", {
       jobId: job.id,
       posterId,
       duration_ms: Date.now() - logStart,
+      layers: layerUrls.length,
     });
   } catch (error) {
     const err = error as Error;

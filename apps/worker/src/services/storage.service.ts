@@ -7,7 +7,8 @@ export async function downloadAndUpload(
   sourceUrl: string,
   bucket: string,
   storagePath: string,
-  contentType: string = "image/png"
+  contentType: string = "image/png",
+  upsert: boolean = false
 ): Promise<string> {
   // Download the image
   const response = await fetch(sourceUrl);
@@ -24,7 +25,7 @@ export async function downloadAndUpload(
     .from(bucket)
     .upload(storagePath, buffer, {
       contentType,
-      upsert: false,
+      upsert,
     });
 
   if (uploadError) {

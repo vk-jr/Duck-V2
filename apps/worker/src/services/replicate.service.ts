@@ -32,6 +32,25 @@ export async function runImageModel(params: RunModelParams): Promise<string> {
       model: params.model,
       error: errorText,
     });
+
+    // On 429, sleep for the retry_after window before throwing.
+    // BullMQ fires the next retry ~1s after we throw, so by then
+    // the Replicate rate-limit window will have fully reset.
+    if (createResponse.status === 429) {
+      let waitMs = 15_000; // safe default
+      try {
+        const body = JSON.parse(errorText) as { retry_after?: number };
+        if (typeof body.retry_after === "number") {
+          waitMs = (body.retry_after + 2) * 1000;
+        }
+      } catch { /* unparseable body — use default */ }
+      logger.warn("Replicate rate limited — sleeping before retry", {
+        model: params.model,
+        waitMs,
+      });
+      await sleep(waitMs);
+    }
+
     throw new Error(
       `Replicate returned ${createResponse.status}: ${errorText}`
     );
@@ -93,6 +112,71 @@ export async function runImageModel(params: RunModelParams): Promise<string> {
 
   // Return the URL string
   return Array.isArray(output) ? output[0] : output;
+}
+
+// Like runImageModel but returns ALL output URLs.
+// Used for Qwen segmentation which outputs one URL per layer.
+export async function runImageModelMulti(params: RunModelParams): Promise<string[]> {
+  const createResponse = await fetch(`${REPLICATE_BASE_URL}/models/${params.model}/predictions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.REPLICATE_API_TOKEN}`,
+      "Content-Type": "application/json",
+      Prefer: "wait=60",
+    },
+    body: JSON.stringify({ input: params.input }),
+  });
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text();
+    if (createResponse.status === 429) {
+      let waitMs = 15_000;
+      try {
+        const body = JSON.parse(errorText) as { retry_after?: number };
+        if (typeof body.retry_after === "number") waitMs = (body.retry_after + 2) * 1000;
+      } catch { /* unparseable body — use default */ }
+      logger.warn("Replicate rate limited — sleeping before retry", { waitMs });
+      await sleep(waitMs);
+    }
+    throw new Error(`Replicate returned ${createResponse.status}: ${errorText}`);
+  }
+
+  let prediction = await createResponse.json() as {
+    id: string;
+    status: string;
+    output: string | string[] | null;
+    error: string | null;
+    urls?: { get: string };
+  };
+
+  const maxWaitMs = 5 * 60 * 1000;
+  const pollIntervalMs = 2000;
+  const startTime = Date.now();
+
+  while (
+    prediction.status !== "succeeded" &&
+    prediction.status !== "failed" &&
+    prediction.status !== "canceled"
+  ) {
+    if (Date.now() - startTime > maxWaitMs) {
+      throw new Error(`Replicate prediction ${prediction.id} timed out after 5 minutes`);
+    }
+    await sleep(pollIntervalMs);
+    const pollResponse = await fetch(
+      `${REPLICATE_BASE_URL}/predictions/${prediction.id}`,
+      { headers: { Authorization: `Bearer ${process.env.REPLICATE_API_TOKEN}` } }
+    );
+    if (!pollResponse.ok) throw new Error(`Replicate poll returned ${pollResponse.status}`);
+    prediction = await pollResponse.json() as typeof prediction;
+  }
+
+  if (prediction.status === "failed" || prediction.status === "canceled") {
+    throw new Error(`Replicate prediction ${prediction.status}: ${prediction.error ?? "unknown error"}`);
+  }
+
+  const output = prediction.output;
+  if (!output) throw new Error("Replicate returned no output");
+  return Array.isArray(output) ? output : [output];
 }
 
 function sleep(ms: number): Promise<void> {

@@ -21,24 +21,45 @@ export default async function PosterStudioPage() {
 
     supabase
       .from("posters")
-      .select("id, user_prompt, format, status, background_url, error_message, created_at, brands(name)")
+      .select(
+        "id, user_prompt, format, status, background_url, error_message, created_at, brands(name), poster_layers(layer_index, layer_url)"
+      )
       .eq("created_by", user.id)
       .order("created_at", { ascending: false })
       .limit(20),
   ]);
 
   const brands = brandsResult.data ?? [];
-  const posters = postersResult.data ?? [];
+
+  // Map poster_layers rows into a sorted layer_urls array
+  const posters: PosterRow[] = (postersResult.data ?? []).map((p) => {
+    const rawLayers = (p.poster_layers ?? []) as Array<{ layer_index: number; layer_url: string }>;
+    const layer_urls = rawLayers
+      .sort((a, b) => a.layer_index - b.layer_index)
+      .map((l) => l.layer_url);
+
+    return {
+      id: p.id,
+      user_prompt: p.user_prompt,
+      format: p.format,
+      status: p.status,
+      background_url: p.background_url,
+      error_message: p.error_message,
+      created_at: p.created_at,
+      brands: p.brands as { name: string } | null,
+      layer_urls,
+    };
+  });
 
   return (
     <div className="flex h-full flex-col p-8">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-[var(--text-primary)]">Poster Studio</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          Generate brand-consistent posters with AI — edit text directly on the canvas
+          Generate brand-consistent layered posters with AI — edit every layer directly on canvas
         </p>
       </div>
-      <PosterStudioClient brands={brands} initialPosters={posters as unknown as PosterRow[]} />
+      <PosterStudioClient brands={brands} initialPosters={posters} />
     </div>
   );
 }
@@ -52,4 +73,5 @@ export interface PosterRow {
   error_message: string | null;
   created_at: string;
   brands: { name: string } | null;
+  layer_urls: string[]; // sorted by layer_index ascending (0 = foreground)
 }
