@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
-import { startPosterGeneration, deletePoster } from "./actions";
+import { startPosterGeneration, deletePoster, savePosterPreview } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
@@ -58,6 +58,7 @@ export function PosterStudioClient({
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [completedLayout, setCompletedLayout] = useState<PosterLayout | null>(null);
   const [completedBackgroundUrl, setCompletedBackgroundUrl] = useState<string | null>(null);
+  const [completedHeroImageUrl, setCompletedHeroImageUrl] = useState<string | null>(null);
   const [completedLayerUrls, setCompletedLayerUrls] = useState<string[] | null>(null);
   const [completedPosterId, setCompletedPosterId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +94,7 @@ export function PosterStudioClient({
     const supabase = createClient();
     const { data } = await supabase
       .from("posters")
-      .select("layout_json, background_url, poster_layers(layer_index, layer_url)")
+      .select("layout_json, background_url, hero_image_url, poster_layers(layer_index, layer_url)")
       .eq("id", id)
       .single();
 
@@ -106,9 +107,23 @@ export function PosterStudioClient({
 
     setCompletedLayout(data.layout_json as PosterLayout);
     setCompletedBackgroundUrl(data.background_url);
+    setCompletedHeroImageUrl(data.hero_image_url);
     setCompletedLayerUrls(layerUrls);
     setCompletedPosterId(id);
     setGenStatus("completed");
+  }
+
+  async function handleSavePreview(dataUrl: string) {
+    if (!completedPosterId) return;
+    const result = await savePosterPreview(completedPosterId, dataUrl);
+    if (result.success && result.data) {
+      // Update the preview_url in the local posters list so the pages strip refreshes
+      setPosters((prev) =>
+        prev.map((p) =>
+          p.id === completedPosterId ? { ...p, preview_url: result.data!.previewUrl } : p
+        )
+      );
+    }
   }
 
   async function handleLoadPoster(poster: PosterRow) {
@@ -155,33 +170,35 @@ export function PosterStudioClient({
       )
       .subscribe();
 
-    // Polling fallback every 4 seconds
+    // Polling fallback — single batched query every 8 s (Supabase realtime handles
+    // the fast path; this only fires if the realtime event is missed).
     intervalId = setInterval(async () => {
-      const { data } = await supabase
-        .from("posters")
-        .select("status, error_message")
-        .eq("id", posterId)
-        .single();
+      const [posterRes, jobRes] = await Promise.all([
+        supabase
+          .from("posters")
+          .select("status, error_message")
+          .eq("id", posterId)
+          .single(),
+        supabase
+          .from("poster_jobs")
+          .select("current_stage")
+          .eq("poster_id", posterId)
+          .single(),
+      ]);
 
-      if (data?.status === "completed") {
+      if (posterRes.data?.status === "completed") {
         clearInterval(intervalId);
         supabase.removeChannel(channel);
         loadCompletedPoster(posterId);
-      } else if (data?.status === "failed") {
+      } else if (posterRes.data?.status === "failed") {
         setGenStatus("failed");
-        setError(data.error_message ?? "Poster generation failed");
+        setError(posterRes.data.error_message ?? "Poster generation failed");
         clearInterval(intervalId);
         supabase.removeChannel(channel);
       }
 
-      const { data: jobData } = await supabase
-        .from("poster_jobs")
-        .select("current_stage")
-        .eq("poster_id", posterId)
-        .single();
-
-      if (jobData?.current_stage) setCurrentStage(jobData.current_stage);
-    }, 4000);
+      if (jobRes.data?.current_stage) setCurrentStage(jobRes.data.current_stage);
+    }, 8000);
 
     return () => {
       clearInterval(intervalId);
@@ -194,6 +211,7 @@ export function PosterStudioClient({
     setError(null);
     setCompletedLayout(null);
     setCompletedBackgroundUrl(null);
+    setCompletedHeroImageUrl(null);
     setCompletedLayerUrls(null);
     setCompletedPosterId(null);
     setCurrentStage(null);
@@ -337,9 +355,8 @@ export function PosterStudioClient({
             <ul className="flex flex-col gap-2">
               {posters.map((poster) => {
                 const brand = poster.brands as { name: string } | null;
-                // Thumbnail: use first available layer (foreground) or background_url
-                // background_url is an opaque image; layer 0 is a transparent PNG — not useful as thumb
-                const thumbUrl = poster.background_url ?? poster.layer_urls?.[1];
+                // Thumbnail priority: saved preview (actual canvas) > background > mid-layer
+                const thumbUrl = poster.preview_url ?? poster.background_url ?? poster.layer_urls?.[1];
                 const isSelected = completedPosterId === poster.id;
                 const isLoading = loadingPosterId === poster.id;
                 const isCompleted = poster.status === "completed";
@@ -362,6 +379,8 @@ export function PosterStudioClient({
                         <img
                           src={thumbUrl}
                           alt=""
+                          loading="lazy"
+                          decoding="async"
                           className="h-12 w-12 rounded-lg object-cover"
                         />
                       ) : (
@@ -412,14 +431,63 @@ export function PosterStudioClient({
       {/* Right panel — canvas / progress */}
       <div className="flex-1 min-w-0">
         {genStatus === "completed" && completedLayout && completedLayerUrls && completedPosterId ? (
-          /* Canvas editor fills the full panel — no card padding */
-          <div className="h-full rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-sm overflow-hidden">
-            <PosterCanvas
-              layout={completedLayout}
-              layerUrls={completedLayerUrls}
-              backgroundUrl={completedBackgroundUrl}
-              posterId={completedPosterId}
-            />
+          /* Canvas editor + pages strip */
+          <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-sm overflow-hidden">
+            {/* Canvas — takes all remaining height */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PosterCanvas
+                layout={completedLayout}
+                layerUrls={completedLayerUrls}
+                backgroundUrl={completedBackgroundUrl}
+                heroImageUrl={completedHeroImageUrl}
+                posterId={completedPosterId}
+                brandFonts={completedLayout.brand_fonts}
+                onSavePreview={handleSavePreview}
+              />
+            </div>
+
+            {/* Pages strip */}
+            {posters.filter((p) => p.status === "completed").length > 0 && (
+              <div className="flex flex-shrink-0 items-center gap-2 border-t border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 overflow-x-auto">
+                <p className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] pr-1">
+                  Pages
+                </p>
+                {posters
+                  .filter((p) => p.status === "completed")
+                  .map((poster) => {
+                    const thumb = poster.preview_url ?? poster.background_url ?? poster.layer_urls?.[1];
+                    const isActive = completedPosterId === poster.id;
+                    const isLoading = loadingPosterId === poster.id;
+                    return (
+                      <button
+                        key={poster.id}
+                        onClick={() => handleLoadPoster(poster)}
+                        title={poster.user_prompt}
+                        className={[
+                          "relative flex-shrink-0 rounded-lg overflow-hidden transition-all",
+                          isActive
+                            ? "ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--surface-2)]"
+                            : "opacity-60 hover:opacity-100",
+                        ].join(" ")}
+                        style={{ width: 48, height: 48 }}
+                      >
+                        {thumb ? (
+                          <img src={thumb} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-[var(--surface-1)]">
+                            <LayoutIcon className="h-4 w-4 text-[var(--text-muted)]" />
+                          </div>
+                        )}
+                        {isLoading && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                            <Spinner size="sm" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         ) : (
           <Card className="h-full">

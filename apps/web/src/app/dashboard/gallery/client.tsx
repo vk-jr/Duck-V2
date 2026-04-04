@@ -53,13 +53,21 @@ export function GalleryClient({
 
   if (!images.length) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-[var(--border)] py-20 text-center">
-        <div className="rounded-full bg-[var(--surface-2)] p-4">
-          <Images className="h-8 w-8 text-[var(--text-muted)]" />
+      <div
+        className="flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed py-20 text-center"
+        style={{ borderColor: "var(--border)" }}
+      >
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+        >
+          <Images className="h-8 w-8" style={{ color: "var(--text-subtle)" }} />
         </div>
         <div>
-          <p className="font-medium text-[var(--text-primary)]">No images yet</p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
+          <p className="font-semibold" style={{ color: "var(--text-primary)" }}>
+            No images yet
+          </p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Generate your first image in the Generator
           </p>
         </div>
@@ -88,14 +96,20 @@ export function GalleryClient({
             onChange={(e) => setFilterBrand(e.target.value)}
           />
         </div>
-        <p className="text-sm text-[var(--text-muted)] ml-auto">
+        <p
+          className="text-sm ml-auto tabular-nums"
+          style={{ color: "var(--text-subtle)" }}
+        >
           {filtered.length} image{filtered.length !== 1 ? "s" : ""}
         </p>
       </div>
 
       {/* Grid */}
       {filtered.length === 0 ? (
-        <p className="py-12 text-center text-sm text-[var(--text-muted)]">
+        <p
+          className="py-12 text-center text-sm"
+          style={{ color: "var(--text-muted)" }}
+        >
           No images match your filters
         </p>
       ) : (
@@ -110,15 +124,21 @@ export function GalleryClient({
                   onDelete={i === 0 ? () => handleDelete(img.id) : undefined}
                 />
                 {i === 0 && (
-                  <div className="mt-2 px-1">
-                    <p className="text-xs font-medium text-[var(--text-primary)] leading-snug">
+                  <div className="mt-2 px-0.5">
+                    <p
+                      className="text-xs font-medium leading-snug"
+                      style={{ color: "var(--text-primary)" }}
+                    >
                       {truncate(img.user_prompt ?? "Untitled", 80)}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       {brandMap[img.brand_id] && (
                         <Badge variant="default">{brandMap[img.brand_id]}</Badge>
                       )}
-                      <span className="text-xs text-[var(--text-muted)]">
+                      <span
+                        className="text-[11px]"
+                        style={{ color: "var(--text-subtle)" }}
+                      >
                         {formatDate(img.created_at)}
                       </span>
                     </div>

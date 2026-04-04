@@ -49,15 +49,24 @@ export function SettingsClient({
           />
 
           {message && (
-            <p
-              className={`rounded-lg border px-3 py-2 text-sm ${
+            <div
+              className="rounded-lg px-3 py-2.5 text-sm"
+              style={
                 message.type === "success"
-                  ? "border-green-500/20 bg-green-500/10 text-green-500"
-                  : "border-red-500/20 bg-red-500/10 text-red-500"
-              }`}
+                  ? {
+                      background: "color-mix(in srgb, var(--status-success) 8%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--status-success) 25%, transparent)",
+                      color: "var(--status-success)",
+                    }
+                  : {
+                      background: "color-mix(in srgb, var(--status-error) 8%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--status-error) 25%, transparent)",
+                      color: "var(--status-error)",
+                    }
+              }
             >
               {message.text}
-            </p>
+            </div>
           )}
 
           <div className="flex justify-end">

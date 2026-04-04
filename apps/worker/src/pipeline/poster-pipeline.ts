@@ -5,7 +5,6 @@ import { supabase } from "../services/supabase.service";
 import { logger } from "../logger";
 
 // Strip markdown fences and extract the first complete JSON object from the response.
-// Gemini sometimes wraps JSON in prose or truncates — the brace-scan fallback handles both.
 function parseJsonResponse<T>(raw: string): T {
   const stripped = raw
     .trim()
@@ -16,7 +15,6 @@ function parseJsonResponse<T>(raw: string): T {
   try {
     return JSON.parse(stripped) as T;
   } catch {
-    // Scan for the outermost { … } block and parse that
     const start = stripped.indexOf("{");
     const end = stripped.lastIndexOf("}");
     if (start !== -1 && end > start) {
@@ -28,7 +26,7 @@ function parseJsonResponse<T>(raw: string): T {
   }
 }
 
-// ── Local Types (mirror types/index.ts in web) ────────────────
+// ── Local Types ────────────────────────────────────────────────
 
 export type PosterFormat =
   | "square"
@@ -76,6 +74,7 @@ export interface PosterLayout {
     z_order: string[];
     layer_defaults: PosterLayerDefault[];
   };
+  brand_fonts?: string[];
 }
 
 export interface CompositionAnalysis {
@@ -87,28 +86,82 @@ export interface CompositionAnalysis {
   mood: string;
 }
 
+// Brand guidelines types (mirrors web/src/types/index.ts)
+export interface BrandColor {
+  name: string;
+  hex: string;
+  rgb: string;
+}
+
+export interface BrandFont {
+  name: string;
+  role: "primary" | "secondary" | "accent";
+  weights: string[];
+  usage: string;
+}
+
+export interface BrandGuidelines {
+  primary_colors: BrandColor[];
+  secondary_colors: BrandColor[];
+  fonts: BrandFont[];
+  has_logo: boolean;
+  logo_description: string | null;
+  brand_personality: string[];
+}
+
 // ── STAGE 1a: Build hero image generation prompt ──────────────
-// Claude (with brand context + optional vision) writes a Flux prompt.
-// If referenceImageUrl is provided, Claude sees the image and
-// incorporates its subject/style into the prompt.
+// Writes an art-directed poster background prompt.
+// Uses brand palette and personality to steer away from generic imagery.
+// Model-agnostic — works with any image generation model.
 
 export async function buildHeroImagePrompt(
   userPrompt: string,
   brandSystemPrompt: string,
+  brandGuidelines: BrandGuidelines | null,
   referenceImageUrl?: string
 ): Promise<string> {
-  const textContent = `Write a Flux image generation prompt for a poster hero image.
+  // Build color palette section from structured brand guidelines
+  const paletteLines = [
+    ...(brandGuidelines?.primary_colors ?? []).map(
+      (c) => `  ${c.hex} — ${c.name} (primary)`
+    ),
+    ...(brandGuidelines?.secondary_colors ?? []).map(
+      (c) => `  ${c.hex} — ${c.name} (secondary)`
+    ),
+  ];
+  const colorSection = paletteLines.length
+    ? `BRAND COLOUR PALETTE (these must dominate the image):\n${paletteLines.join("\n")}`
+    : "";
 
-POSTER BRIEF: ${userPrompt}
-${referenceImageUrl ? "\nA reference image is attached. Incorporate its subject, style, and visual elements into the generated poster image." : ""}
+  const personality = brandGuidelines?.brand_personality?.length
+    ? `BRAND PERSONALITY: ${brandGuidelines.brand_personality.join(", ")}`
+    : "";
 
-STRICT RULES:
-- NO text, NO typography, NO letters, NO numbers anywhere in the image
-- Apply the brand's visual style, colour palette, and aesthetic from your system instructions
-- Describe the main subject, scene, lighting, composition, and mood in detail
-- The image should work as a full-bleed poster background with a clear subject area
-- Maximum 200 words
-- Output ONLY the image generation prompt — no preamble, no explanation`;
+  const referenceNote = referenceImageUrl
+    ? "\nA reference image is attached — incorporate its subject as a focal design element in the composition."
+    : "";
+
+  // Strip control characters to prevent prompt injection via newline injection
+  const safePrompt = userPrompt.replace(/[\r\n\x00-\x08\x0B-\x1F\x7F]+/g, " ").trim();
+
+  const textContent = `Write a poster background image generation prompt.
+
+POSTER BRIEF: """${safePrompt}"""${referenceNote}
+
+${colorSection}
+
+${personality}
+
+ART DIRECTION:
+- Designed poster background, NOT a photograph or stock image
+- Graphic design / editorial aesthetic — agency-quality poster art
+- Colour story dominated entirely by the brand palette above
+- Abstract or conceptual visual that relates thematically to the brief
+- Bold high-contrast composition with generous empty zones for text overlay
+- No text, no typography, no UI elements, no logos anywhere
+- Think: Pentagram, IDEO, Wolff Olins level of craft and intentionality
+
+Output ONLY the image prompt — maximum 200 words. No explanation.`;
 
   const messages = referenceImageUrl
     ? [imageMessage(referenceImageUrl, textContent)]
@@ -121,23 +174,25 @@ STRICT RULES:
         role: "system",
         content:
           brandSystemPrompt ||
-          "You are an expert image prompt engineer for brand-consistent visuals.",
+          "You are an expert art director specialising in brand-consistent poster design. Write image generation prompts that produce editorial-quality poster backgrounds with strong graphic design aesthetics.",
       },
       ...messages,
     ],
-    temperature: 0.6,
+    temperature: 0.7,
     maxTokens: 400,
   });
 
   const prompt = response.content.trim();
-  logger.info("Hero image prompt built", { length: prompt.length, hasReference: !!referenceImageUrl });
+  logger.info("Hero image prompt built", {
+    length: prompt.length,
+    hasReference: !!referenceImageUrl,
+  });
   return prompt;
 }
 
-// ── STAGE 1b: Generate hero image via Replicate ───────────────
-// txt2img (Flux 1.1 Pro) if no reference image.
-// img2img (Flux Kontext Pro) if reference image provided.
-// Returns the temporary Replicate CDN URL.
+// ── STAGE 1b: Generate hero image ────────────────────────────
+// txt2img if no reference image; img2img if reference provided.
+// Returns the temporary CDN URL from the image model provider.
 
 export async function generateHeroImage(
   imagePrompt: string,
@@ -152,7 +207,6 @@ export async function generateHeroImage(
   let heroUrl: string;
 
   if (referenceImageUrl) {
-    // img2img: Flux Kontext — preserves subject from reference image
     heroUrl = await runImageModel({
       model: process.env.MODEL_IMG2IMG!,
       input: {
@@ -165,7 +219,6 @@ export async function generateHeroImage(
     });
     logger.info("Hero image generated (img2img)");
   } else {
-    // txt2img: Flux 1.1 Pro
     heroUrl = await runImageModel({
       model: process.env.MODEL_POSTER_BG_IMAGE!,
       input: {
@@ -182,11 +235,10 @@ export async function generateHeroImage(
   return heroUrl;
 }
 
-// ── STAGE 2: Qwen segmentation ────────────────────────────────
+// ── STAGE 2: Segmentation ─────────────────────────────────────
 // Segments the hero image into up to 8 transparent PNG layers.
 // Downloads each layer and uploads to the poster-layers bucket.
 // Inserts one row per layer into poster_layers table.
-// Returns array of permanent Supabase Storage URLs (index = layer_index).
 
 export async function segmentHeroImage(
   heroImageUrl: string,
@@ -198,35 +250,24 @@ export async function segmentHeroImage(
     input: {
       image: heroImageUrl,
       go_fast: true,
-      num_layers: 8,          // maximum layers for maximum depth
+      num_layers: 8,
       description: "auto",
       output_format: "png",
       output_quality: 95,
     },
   });
 
-  logger.info("Qwen segmentation complete", { layerCount: replicateLayerUrls.length });
+  logger.info("Segmentation complete", { layerCount: replicateLayerUrls.length });
 
-  // On retries the files and rows from the previous attempt already exist — clean them up first.
   await supabase.from("poster_layers").delete().eq("poster_id", posterId);
 
-  // Download each layer and upload to permanent Supabase Storage.
-  // upsert=true so retries overwrite the files from the previous failed attempt.
   const permanentUrls = await Promise.all(
     replicateLayerUrls.map(async (url, i) => {
       const storagePath = `${userId}/${posterId}/layer-${i}.png`;
-      const permanentUrl = await downloadAndUpload(
-        url,
-        "poster-layers",
-        storagePath,
-        "image/png",
-        true  // upsert
-      );
-      return permanentUrl;
+      return downloadAndUpload(url, "poster-layers", storagePath, "image/png", true);
     })
   );
 
-  // Insert one row per layer into poster_layers table
   const { error } = await supabase.from("poster_layers").insert(
     permanentUrls.map((url, i) => ({
       poster_id: posterId,
@@ -244,8 +285,6 @@ export async function segmentHeroImage(
 }
 
 // ── STAGE 3: Composition analysis ────────────────────────────
-// Gemini Pro Vision analyses the hero image to identify where the
-// subject is and which zones are free for text placement.
 
 export async function analyseComposition(
   heroImageUrl: string
@@ -260,12 +299,7 @@ export async function analyseComposition(
 Schema:
 {
   "subject_position": "center" | "left" | "right" | "center-left" | "center-right" | "full-frame",
-  "subject_bounds": {
-    "x": number,
-    "y": number,
-    "w": number,
-    "h": number
-  },
+  "subject_bounds": { "x": number, "y": number, "w": number, "h": number },
   "empty_zones": ["string"],
   "composition_direction": "left-heavy" | "right-heavy" | "centered" | "full",
   "dominant_colors": ["#hex", "#hex", "#hex"],
@@ -278,7 +312,7 @@ JSON only.`
       ),
     ],
     temperature: 0.1,
-    maxTokens: 2000, // 600 was too low — Gemini was truncating the JSON mid-object
+    maxTokens: 2000,
   });
 
   const analysis = parseJsonResponse<CompositionAnalysis>(response.content);
@@ -289,24 +323,20 @@ JSON only.`
   return analysis;
 }
 
-// ── STAGE 4 helper: Compute layer_stack from composition ─────
-// Layer positions are purely mathematical — derived from the subject
-// bounds that Gemini identified. Claude doesn't need to generate this.
-// Layer 0 = foreground (topmost): centred exactly on subject.
-// Each deeper layer nudges slightly toward canvas centre for depth.
+// ── STAGE 4 helper: Compute layer_stack ──────────────────────
 
 function computeLayerStack(
   composition: CompositionAnalysis,
   layerCount: number
 ): PosterLayout["layer_stack"] {
   const { subject_bounds } = composition;
-  const cx = subject_bounds.x + subject_bounds.w / 2; // subject centre X %
-  const cy = subject_bounds.y + subject_bounds.h / 2; // subject centre Y %
+  const cx = subject_bounds.x + subject_bounds.w / 2;
+  const cy = subject_bounds.y + subject_bounds.h / 2;
 
   const layer_defaults: PosterLayerDefault[] = Array.from(
     { length: layerCount },
     (_, i) => {
-      const depth = i / Math.max(layerCount - 1, 1); // 0 (foreground) → 1 (deepest)
+      const depth = i / Math.max(layerCount - 1, 1);
       return {
         layer_index: i,
         label:
@@ -315,19 +345,17 @@ function computeLayerStack(
             : i === layerCount - 1
             ? "background_strip"
             : `mid_${i}`,
-        // Nudge deeper layers toward canvas centre (50, 50) for parallax depth
         position_x: cx + (50 - cx) * depth * 0.25,
         position_y: cy + (50 - cy) * depth * 0.25,
-        scale: 1.0 - depth * 0.08,           // foreground full size; deepest slightly smaller
+        scale: 1.0 - depth * 0.08,
         opacity: i === 0 ? 1.0 : 1.0 - depth * 0.15,
       };
     }
   );
 
-  // z_order: background canvas → deepest layer → … → foreground → text
   const imageLayerIds = Array.from(
     { length: layerCount },
-    (_, i) => `layer_${layerCount - 1 - i}` // deepest first
+    (_, i) => `layer_${layerCount - 1 - i}`
   );
 
   return {
@@ -337,23 +365,57 @@ function computeLayerStack(
 }
 
 // ── STAGE 4: Layout & text design ────────────────────────────
-// Claude only generates background spec + text layers.
-// layer_stack is computed deterministically — not generated by the model.
-// This keeps Claude's output small and avoids JSON truncation/corruption.
+// Claude generates background spec + text layers using brand fonts and colors.
+// brand_fonts[] is included in the output so the canvas editor can populate
+// the font picker with the correct options.
 
 type ClaudeLayoutOutput = {
   dimensions: { width: number; height: number; format: PosterFormat };
   background: PosterBackground;
   text_layers: PosterTextLayer[];
+  brand_fonts?: string[];
 };
 
 export async function buildPosterLayout(
   userPrompt: string,
   composition: CompositionAnalysis,
   brandSystemPrompt: string,
+  brandGuidelines: BrandGuidelines | null,
   dimensions: { width: number; height: number; format: PosterFormat },
   layerCount: number
 ): Promise<PosterLayout> {
+  const brandFonts = brandGuidelines?.fonts ?? [];
+
+  // Font section — use brand fonts if available, fallback list otherwise
+  const fontSection = brandFonts.length
+    ? `BRAND TYPOGRAPHY — use ONLY these fonts (they are the brand's identity):
+${brandFonts
+  .map(
+    (f) =>
+      `  "${f.name}" [${f.role}] — ${f.usage}. Available weights: ${f.weights.join(", ")}`
+  )
+  .join("\n")}`
+    : `FALLBACK FONTS (no brand fonts detected — pick the most appropriate):
+  Bold/impact: "Oswald", "Bebas Neue", "Montserrat"
+  Elegant:     "Playfair Display", "Cormorant Garamond"
+  Modern:      "Poppins", "Raleway", "DM Sans"
+  Readable:    "Lato", "Source Sans 3"`;
+
+  // Color section — use exact hex values from brand guidelines
+  const allColors = [
+    ...(brandGuidelines?.primary_colors ?? []),
+    ...(brandGuidelines?.secondary_colors ?? []),
+  ];
+  const colorSection = allColors.length
+    ? `BRAND COLOURS — use ONLY these exact hex values for all text and background colours:
+${allColors.map((c) => `  ${c.hex} — ${c.name}`).join("\n")}`
+    : "Use colours from the brand palette in your system instructions.";
+
+  const exampleFont = brandFonts[0]?.name ?? "Montserrat";
+  const exampleFontList = brandFonts.length
+    ? brandFonts.map((f) => `"${f.name}"`).join(", ")
+    : '"Montserrat"';
+
   const response = await chat({
     model: process.env.MODEL_POSTER_LAYOUT!,
     messages: [
@@ -367,26 +429,24 @@ export async function buildPosterLayout(
         role: "user",
         content: `Design a poster layout for this request.
 
-POSTER REQUEST: ${userPrompt}
+POSTER REQUEST: """${userPrompt.replace(/[\r\n\x00-\x08\x0B-\x1F\x7F]+/g, " ").trim()}"""
 CANVAS: ${dimensions.width}×${dimensions.height}px (format: ${dimensions.format})
 
 IMAGE COMPOSITION ANALYSIS:
 ${JSON.stringify(composition, null, 2)}
 
-RULES:
+${fontSection}
+
+${colorSection}
+
+LAYOUT RULES:
 1. Place text ONLY inside the empty_zones listed above.
 2. NEVER place any text_layer within the subject_bounds area.
-3. Use ONLY colours from the brand palette in your system instructions.
-4. Font sizes: headline 72–120px, subheadline 36–56px, body 20–28px, CTA 22–32px.
-5. position_x and position_y are % of canvas (0–100), centre of each text block.
-6. max_width_percent is the text box width as % of canvas width.
-7. background.type = "solid_color" if brand has a strong primary colour; else "ai_image" with background_prompt (no people, no text, no letters).
-
-AVAILABLE GOOGLE FONTS:
-  Bold/impact: "Oswald", "Bebas Neue", "Montserrat"
-  Elegant:     "Playfair Display", "Cormorant Garamond"
-  Modern:      "Poppins", "Raleway", "DM Sans"
-  Readable:    "Lato", "Source Sans 3"
+3. Font sizes: headline 72–120px, subheadline 36–56px, body 20–28px, CTA 22–32px.
+4. position_x and position_y are % of canvas (0–100), centre of each text block.
+5. max_width_percent is the text box width as % of canvas width.
+6. background.type = "solid_color" uses a brand hex color; "ai_image" adds a background_prompt (no people, no text).
+7. brand_fonts: list every unique font name you used across all text_layers.
 
 Respond ONLY in this exact JSON schema — nothing else:
 {
@@ -402,7 +462,7 @@ Respond ONLY in this exact JSON schema — nothing else:
       "content": "string",
       "font_size": 96,
       "font_weight": "bold",
-      "font_family": "Oswald",
+      "font_family": "${exampleFont}",
       "color": "#hex",
       "position_x": 25,
       "position_y": 20,
@@ -412,7 +472,8 @@ Respond ONLY in this exact JSON schema — nothing else:
       "line_height": 1.1,
       "text_shadow": true
     }
-  ]
+  ],
+  "brand_fonts": [${exampleFontList}]
 }`,
       },
     ],
@@ -423,7 +484,6 @@ Respond ONLY in this exact JSON schema — nothing else:
 
   const partial = parseJsonResponse<ClaudeLayoutOutput>(response.content);
 
-  // Merge Claude's output with the deterministically computed layer_stack
   const layout: PosterLayout = {
     ...partial,
     layer_stack: computeLayerStack(composition, layerCount),
@@ -433,14 +493,12 @@ Respond ONLY in this exact JSON schema — nothing else:
     textLayers: layout.text_layers?.length,
     backgroundType: layout.background?.type,
     imageLayers: layerCount,
+    brandFonts: layout.brand_fonts,
   });
   return layout;
 }
 
 // ── STAGE 5: Canvas background generation (conditional) ───────
-// Only runs when layout.background.type = "ai_image".
-// Generates a pure visual background (no subject — subject is in layers).
-// Returns permanent Supabase Storage URL.
 
 export async function generateCanvasBackground(
   backgroundPrompt: string,
@@ -453,7 +511,7 @@ export async function generateCanvasBackground(
   if (ratio > 1.3) aspectRatio = "16:9";
   else if (ratio < 0.8) aspectRatio = "9:16";
 
-  const replicateCdnUrl = await runImageModel({
+  const cdnUrl = await runImageModel({
     model: process.env.MODEL_POSTER_BG_IMAGE!,
     input: {
       prompt: backgroundPrompt,
@@ -466,7 +524,7 @@ export async function generateCanvasBackground(
 
   const storagePath = `${userId}/${posterId}/background.png`;
   const permanentUrl = await downloadAndUpload(
-    replicateCdnUrl,
+    cdnUrl,
     "poster-backgrounds",
     storagePath,
     "image/png"

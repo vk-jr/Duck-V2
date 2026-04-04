@@ -89,14 +89,20 @@ export function BrandDetailClient({ brand: initial }: { brand: Brand }) {
       <div className="mb-8 max-w-4xl">
         <Link
           href="/dashboard/brands"
-          className="mb-4 inline-flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+          style={{ color: "var(--text-muted)" }}
         >
-          <ArrowLeft className="h-4 w-4" /> Back to brands
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to brands
         </Link>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-[var(--text-primary)]">{brand.name}</h1>
-            <p className="mt-1 text-sm text-[var(--text-muted)]">
+            <h1
+              className="text-2xl font-bold tracking-tight"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {brand.name}
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
               Created {formatDate(brand.created_at)}
             </p>
           </div>
@@ -116,9 +122,15 @@ export function BrandDetailClient({ brand: initial }: { brand: Brand }) {
 
       {/* Processing state */}
       {isProcessing && (
-        <div className="mb-6 max-w-4xl flex items-center gap-3 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-4 py-3">
+        <div
+          className="mb-6 max-w-4xl flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{
+            border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+            background: "color-mix(in srgb, var(--accent) 5%, var(--surface-1))",
+          }}
+        >
           <Spinner size="sm" />
-          <p className="text-sm text-[var(--text-primary)]">
+          <p className="text-sm" style={{ color: "var(--text-primary)" }}>
             Analysing your reference images and building the brand visual DNA…
           </p>
         </div>
@@ -164,7 +176,14 @@ export function BrandDetailClient({ brand: initial }: { brand: Brand }) {
                   />
                   <div className="flex items-center justify-between">
                     {saveMessage && (
-                      <p className={`text-sm ${saveMessage === "Saved!" ? "text-green-500" : "text-red-500"}`}>
+                      <p
+                        className="text-sm"
+                        style={{
+                          color: saveMessage === "Saved!"
+                            ? "var(--status-success)"
+                            : "var(--status-error)",
+                        }}
+                      >
                         {saveMessage}
                       </p>
                     )}
@@ -179,7 +198,10 @@ export function BrandDetailClient({ brand: initial }: { brand: Brand }) {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--text-muted)] py-4 text-center">
+                <p
+                  className="py-6 text-center text-sm"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   {isProcessing
                     ? "Generating visual style guide…"
                     : "Style guide not generated yet"}
@@ -198,8 +220,11 @@ export function BrandDetailClient({ brand: initial }: { brand: Brand }) {
               referenceImages={brand.brand_images ?? []}
             />
           ) : (
-            <div className="rounded-xl border border-dashed border-[var(--border)] p-8 text-center">
-              <p className="text-sm text-[var(--text-muted)]">
+            <div
+              className="rounded-xl border-2 border-dashed p-8 text-center"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 {isProcessing ? "Extracting brand guide…" : "Brand guide not yet generated"}
               </p>
             </div>
@@ -240,19 +265,31 @@ function BrandGuideCard({
   return (
     <Card className="mb-6 overflow-hidden">
       {/* Header */}
-      <div className="border-b border-[var(--border)] px-6 py-5">
-        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+      <div
+        className="px-6 py-5"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <p
+          className="text-[10px] font-semibold uppercase tracking-widest"
+          style={{ color: "var(--accent)" }}
+        >
           Brand Guide
         </p>
-        <h2 className="mt-0.5 text-xl font-bold tracking-tight text-[var(--text-primary)]">
+        <h2
+          className="mt-1 text-xl font-bold tracking-tight"
+          style={{ color: "var(--text-primary)" }}
+        >
           {brandName}
         </h2>
       </div>
 
-      <CardContent className="divide-y divide-[var(--border)] p-0">
+      <CardContent className="p-0" style={{ borderTop: "none" }}>
         {/* LOGOS */}
-        <section className="px-6 py-5">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+        <section className="px-6 py-5" style={{ borderBottom: "1px solid var(--border)" }}>
+          <p
+            className="mb-3 text-[10px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--text-subtle)" }}
+          >
             Logos
           </p>
           <div className="flex flex-wrap gap-3">
@@ -273,8 +310,11 @@ function BrandGuideCard({
         </section>
 
         {/* COLORS */}
-        <section className="px-6 py-5">
-          <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+        <section className="px-6 py-5" style={{ borderBottom: "1px solid var(--border)" }}>
+          <p
+            className="mb-4 text-[10px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--text-subtle)" }}
+          >
             Colors
           </p>
 
@@ -307,8 +347,11 @@ function BrandGuideCard({
 
         {/* TYPOGRAPHY */}
         {guidelines.fonts?.length > 0 && (
-          <section className="px-6 py-5">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+          <section className="px-6 py-5" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p
+              className="mb-4 text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--text-subtle)" }}
+            >
               Typography
             </p>
             <div className="flex flex-col gap-6">
@@ -348,14 +391,22 @@ function BrandGuideCard({
         {/* BRAND PERSONALITY */}
         {guidelines.brand_personality?.length > 0 && (
           <section className="px-6 py-5">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+            <p
+              className="mb-3 text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--text-subtle)" }}
+            >
               Brand Personality
             </p>
             <div className="flex flex-wrap gap-2">
               {guidelines.brand_personality.map((trait) => (
                 <span
                   key={trait}
-                  className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--text-primary)]"
+                  className="rounded-full px-3 py-1 text-xs font-medium"
+                  style={{
+                    border: "1px solid var(--border-strong)",
+                    background: "var(--surface-2)",
+                    color: "var(--text-primary)",
+                  }}
                 >
                   {trait}
                 </span>
@@ -369,24 +420,34 @@ function BrandGuideCard({
 }
 
 function ColorSwatch({ color }: { color: import("@/types").BrandColor }) {
-  // Determine if the swatch needs a border (for very light colours)
-  const needsBorder =
+  const isLight =
     color.hex.toLowerCase() === "#ffffff" ||
     color.hex.toLowerCase() === "#f4f4f4" ||
     color.hex.toLowerCase() === "#fafafa";
 
   return (
-    <div className="flex flex-col items-start gap-1.5">
+    <div className="flex flex-col items-start gap-2">
       <div
-        className={`h-16 w-16 rounded-xl ${needsBorder ? "border border-[var(--border)]" : ""}`}
-        style={{ backgroundColor: color.hex }}
+        className="h-14 w-14 rounded-xl transition-transform duration-150 hover:scale-105"
+        style={{
+          backgroundColor: color.hex,
+          border: isLight ? "1px solid var(--border)" : undefined,
+          boxShadow: isLight ? undefined : `0 2px 8px ${color.hex}40`,
+        }}
       />
       <div>
-        <p className="text-xs font-medium text-[var(--text-primary)]">{color.name}</p>
-        <p className="text-xs text-[var(--text-muted)]">{color.hex}</p>
-        {color.rgb && (
-          <p className="text-xs text-[var(--text-muted)]">RGB: {color.rgb}</p>
-        )}
+        <p
+          className="text-xs font-semibold"
+          style={{ color: "var(--text-primary)" }}
+        >
+          {color.name}
+        </p>
+        <p
+          className="font-mono text-[10px] uppercase"
+          style={{ color: "var(--text-subtle)" }}
+        >
+          {color.hex}
+        </p>
       </div>
     </div>
   );

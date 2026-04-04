@@ -15,7 +15,8 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
       {label && (
         <label
           htmlFor={inputId}
-          className="text-sm font-medium text-[var(--text-primary)]"
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: "var(--text-secondary)" }}
         >
           {label}
         </label>
@@ -23,14 +24,27 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
       <input
         id={inputId}
         className={cn(
-          "h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-colors focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50",
-          error && "border-red-500 focus:border-red-500 focus:ring-red-500",
+          "h-9 w-full rounded-lg border bg-[var(--input-bg)] px-3 text-sm",
+          "text-[var(--text-primary)] placeholder:text-[var(--text-subtle)]",
+          "border-[var(--input-border)]",
+          "transition-all duration-150",
+          "focus:border-[var(--input-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20",
+          "disabled:cursor-not-allowed disabled:opacity-40",
+          error && "border-[var(--status-error)] focus:border-[var(--status-error)] focus:ring-red-500/20",
           className
         )}
         {...props}
       />
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      {hint && !error && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
+      {error && (
+        <p className="flex items-center gap-1 text-xs" style={{ color: "var(--status-error)" }}>
+          {error}
+        </p>
+      )}
+      {hint && !error && (
+        <p className="text-xs" style={{ color: "var(--text-subtle)" }}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

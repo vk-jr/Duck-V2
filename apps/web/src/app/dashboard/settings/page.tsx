@@ -19,8 +19,15 @@ export default async function SettingsPage() {
 
   return (
     <div className="p-8 max-w-2xl">
-      <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-2">Settings</h1>
-      <p className="text-sm text-[var(--text-muted)] mb-8">Manage your profile</p>
+      <h1
+        className="text-2xl font-bold tracking-tight mb-2"
+        style={{ color: "var(--text-primary)" }}
+      >
+        Settings
+      </h1>
+      <p className="text-sm mb-8" style={{ color: "var(--text-muted)" }}>
+        Manage your profile
+      </p>
       <SettingsClient profile={profile} userId={user.id} />
     </div>
   );

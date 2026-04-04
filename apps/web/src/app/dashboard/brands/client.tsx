@@ -39,13 +39,21 @@ export function BrandsClient({ brands: initial }: { brands: BrandWithImages[] })
 
   if (!brands.length) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-[var(--border)] py-20 text-center">
-        <div className="rounded-full bg-[var(--surface-2)] p-4">
-          <Layers className="h-8 w-8 text-[var(--text-muted)]" />
+      <div
+        className="flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed py-20 text-center"
+        style={{ borderColor: "var(--border)" }}
+      >
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+        >
+          <Layers className="h-8 w-8" style={{ color: "var(--text-subtle)" }} />
         </div>
         <div>
-          <p className="font-medium text-[var(--text-primary)]">No brands yet</p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
+          <p className="font-semibold" style={{ color: "var(--text-primary)" }}>
+            No brands yet
+          </p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Create your first brand to start generating images
           </p>
         </div>
@@ -69,42 +77,72 @@ export function BrandsClient({ brands: initial }: { brands: BrandWithImages[] })
           <Link
             key={brand.id}
             href={`/dashboard/brand/${brand.id}`}
-            className="group flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 transition-colors hover:border-[var(--accent)]/50"
+            className="group flex flex-col gap-0 overflow-hidden rounded-2xl transition-all duration-200 hover:-translate-y-0.5"
+            style={{
+              border: "1px solid var(--border)",
+              background: "var(--card-bg)",
+              boxShadow: "var(--card-shadow)",
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.borderColor = "var(--border-strong)";
+              el.style.boxShadow = "var(--card-shadow-hover)";
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.borderColor = "var(--border)";
+              el.style.boxShadow = "var(--card-shadow)";
+            }}
           >
             {/* Thumbnail grid */}
-            <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden aspect-video bg-[var(--surface-2)]">
+            <div
+              className="grid grid-cols-2 aspect-video overflow-hidden"
+              style={{ background: "var(--surface-2)" }}
+            >
               {thumbnails.length ? (
                 thumbnails.map((img) => (
-                  <div key={img.id} className="relative overflow-hidden bg-[var(--surface-2)]">
+                  <div key={img.id} className="relative overflow-hidden">
                     <Image
                       src={img.image_url}
                       alt=""
                       fill
-                      className="object-cover"
+                      className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                       unoptimized
                     />
                   </div>
                 ))
               ) : (
-                <div className="col-span-2 flex items-center justify-center text-[var(--text-muted)]">
+                <div
+                  className="col-span-2 flex items-center justify-center"
+                  style={{ color: "var(--text-subtle)" }}
+                >
                   <Layers className="h-8 w-8 opacity-30" />
                 </div>
               )}
             </div>
 
             {/* Info */}
-            <div className="flex items-start justify-between gap-2">
+            <div
+              className="flex items-center justify-between gap-2 px-4 py-3"
+              style={{ borderTop: "1px solid var(--border)" }}
+            >
               <div className="min-w-0">
-                <p className="truncate font-semibold text-[var(--text-primary)]">
+                <p
+                  className="truncate text-sm font-semibold"
+                  style={{ color: "var(--text-primary)" }}
+                >
                   {brand.name}
                 </p>
-                <p className="text-xs text-[var(--text-muted)]">
+                <p className="text-xs" style={{ color: "var(--text-subtle)" }}>
                   {formatDateShort(brand.created_at)}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <StatusBadge status={brand.status} />
-                <ArrowRight className="h-4 w-4 text-[var(--text-muted)] opacity-0 transition-opacity group-hover:opacity-100" />
+                <ArrowRight
+                  className="h-3.5 w-3.5 opacity-0 transition-all duration-150 group-hover:opacity-100 group-hover:translate-x-0.5"
+                  style={{ color: "var(--text-muted)" }}
+                />
               </div>
             </div>
           </Link>

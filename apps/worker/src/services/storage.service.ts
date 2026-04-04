@@ -1,6 +1,24 @@
 import { supabase } from "./supabase.service";
 import { logger } from "../logger";
 
+// Allowlist of trusted external hosts that downloadAndUpload may fetch from.
+// Replicate CDN delivers AI-generated images; Supabase hosts signed upload URLs.
+function isAllowedSourceUrl(sourceUrl: string): boolean {
+  try {
+    const url = new URL(sourceUrl);
+    if (url.protocol !== "https:") return false;
+    const supabaseHost = process.env.SUPABASE_URL
+      ? new URL(process.env.SUPABASE_URL).hostname
+      : null;
+    const allowedHosts = ["replicate.delivery", ...(supabaseHost ? [supabaseHost] : [])];
+    return allowedHosts.some(
+      (h) => url.hostname === h || url.hostname.endsWith(`.${h}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Download a temporary URL (e.g. from Replicate) and upload to Supabase Storage permanently
 
 export async function downloadAndUpload(
@@ -10,6 +28,10 @@ export async function downloadAndUpload(
   contentType: string = "image/png",
   upsert: boolean = false
 ): Promise<string> {
+  if (!isAllowedSourceUrl(sourceUrl)) {
+    throw new Error(`Download blocked: untrusted source URL`);
+  }
+
   // Download the image
   const response = await fetch(sourceUrl);
   if (!response.ok) {

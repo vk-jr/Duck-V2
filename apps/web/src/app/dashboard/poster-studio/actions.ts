@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase/server";
 import { addPosterGenerationJob } from "@/lib/queue/producer";
+import { checkPosterGenerationLimit } from "@/lib/rate-limit";
 import type { ActionResult, PosterFormat } from "@/types";
 
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
@@ -26,6 +27,9 @@ export async function startPosterGeneration(
   } = await supabase.auth.getUser();
 
   if (!user) return { success: false, error: "Not authenticated" };
+
+  const { allowed } = await checkPosterGenerationLimit(user.id);
+  if (!allowed) return { success: false, error: "Daily poster limit reached. Try again tomorrow." };
 
   const raw = {
     prompt: formData.get("prompt"),
@@ -65,6 +69,16 @@ export async function startPosterGeneration(
     }
     if (referenceFile.size > MAX_IMAGE_BYTES) {
       return { success: false, error: "Reference image must be under 10 MB" };
+    }
+
+    // Validate actual file bytes — file.type is client-controlled and can be spoofed
+    const hdr = new Uint8Array(await referenceFile.slice(0, 12).arrayBuffer());
+    const isJpeg = hdr[0] === 0xFF && hdr[1] === 0xD8;
+    const isPng  = hdr[0] === 0x89 && hdr[1] === 0x50 && hdr[2] === 0x4E && hdr[3] === 0x47;
+    const isWebp = hdr[0] === 0x52 && hdr[1] === 0x49 && hdr[2] === 0x46 && hdr[3] === 0x46
+                && hdr[8] === 0x57 && hdr[9] === 0x45 && hdr[10] === 0x42 && hdr[11] === 0x50;
+    if (!isJpeg && !isPng && !isWebp) {
+      return { success: false, error: "Reference image must be JPEG, PNG, or WebP" };
     }
 
     // We need the posterId for the storage path — generate it now
@@ -162,6 +176,66 @@ export async function startPosterGeneration(
   });
 
   return { success: true, data: { posterId: poster.id } };
+}
+
+// Accepts the canvas export as a base64 data URL, uploads as JPEG preview,
+// and stores the URL in posters.preview_url.
+export async function savePosterPreview(
+  posterId: string,
+  dataUrl: string
+): Promise<ActionResult<{ previewUrl: string }>> {
+  const supabase = await createSupabaseServerClient();
+  const service = createServiceClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  // Verify ownership
+  const { data: poster } = await service
+    .from("posters")
+    .select("id, created_by")
+    .eq("id", posterId)
+    .single();
+
+  if (!poster || poster.created_by !== user.id) {
+    return { success: false, error: "Poster not found" };
+  }
+
+  // Convert base64 data URL to buffer
+  const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
+  if (!base64 || base64.length > 5 * 1024 * 1024) {
+    return { success: false, error: "Preview image is invalid or too large" };
+  }
+  const buffer = Buffer.from(base64, "base64");
+
+  const storagePath = `${user.id}/${posterId}/preview.jpg`;
+
+  const { error: uploadError } = await service.storage
+    .from("poster-layers")
+    .upload(storagePath, buffer, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+
+  if (uploadError) {
+    return { success: false, error: "Failed to upload preview" };
+  }
+
+  const { data: urlData } = service.storage
+    .from("poster-layers")
+    .getPublicUrl(storagePath);
+
+  const previewUrl = urlData.publicUrl;
+
+  await service
+    .from("posters")
+    .update({ preview_url: previewUrl })
+    .eq("id", posterId);
+
+  return { success: true, data: { previewUrl } };
 }
 
 export async function deletePoster(posterId: string): Promise<ActionResult> {

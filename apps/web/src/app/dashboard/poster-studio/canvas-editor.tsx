@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronUp, ChevronDown, Eye, EyeOff,
-  Type, ImageIcon, Layers, Lock, Plus, Trash2,
+  Type, ImageIcon, Layers, Lock, Plus, Trash2, Save, Check,
 } from "lucide-react";
 import type { PosterLayout } from "@/types";
 
@@ -11,7 +11,10 @@ interface PosterCanvasProps {
   layout: PosterLayout;
   layerUrls: string[];
   backgroundUrl: string | null;
+  heroImageUrl?: string | null;
   posterId: string;
+  brandFonts?: string[];
+  onSavePreview?: (dataUrl: string) => Promise<void>;
 }
 
 interface LayerItem {
@@ -91,7 +94,7 @@ function PropSlider({
   );
 }
 
-export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: PosterCanvasProps) {
+export function PosterCanvas({ layout, layerUrls, backgroundUrl, heroImageUrl, posterId, brandFonts, onSavePreview }: PosterCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<any>(null);
 
@@ -107,6 +110,7 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
   const [layerList, setLayerList] = useState<LayerItem[]>([]);
   const [textProps, setTextProps] = useState<TextProps | null>(null);
   const [imageProps, setImageProps] = useState<ImageProps | null>(null);
+  const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
 
   // ── Shared helpers ─────────────────────────────────────────
 
@@ -366,6 +370,35 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
     syncSelection(null);
   }
 
+  function deleteLayer(obj: any) {
+    const canvas = fabricRef.current;
+    if (!canvas || !obj.selectable) return;
+    canvas.remove(obj);
+    if (canvas.getActiveObject() === obj) {
+      canvas.discardActiveObject();
+      syncSelection(null);
+    }
+    canvas.renderAll();
+    refreshLayers();
+  }
+
+  async function savePoster() {
+    if (!fabricRef.current || !onSavePreview) return;
+    setSaving("saving");
+    try {
+      const dataUrl = fabricRef.current.toDataURL({
+        format: "jpeg",
+        quality: 0.85,
+        multiplier: 0.5, // half resolution is enough for preview
+      });
+      await onSavePreview(dataUrl);
+      setSaving("saved");
+      setTimeout(() => setSaving("idle"), 2500);
+    } catch {
+      setSaving("idle");
+    }
+  }
+
   // ── Property updates ───────────────────────────────────────
 
   function updateTextProp(key: keyof TextProps, value: string | number) {
@@ -459,6 +492,26 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
           </button>
         )}
 
+        {/* Save preview */}
+        {onSavePreview && (
+          <button
+            onClick={savePoster}
+            disabled={saving === "saving"}
+            className={[
+              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              saving === "saved"
+                ? "bg-green-500/20 text-green-400"
+                : "border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:bg-[var(--surface-1)]",
+            ].join(" ")}
+          >
+            {saving === "saved" ? (
+              <><Check className="h-3.5 w-3.5" /> Saved</>
+            ) : (
+              <><Save className="h-3.5 w-3.5" /> Save</>
+            )}
+          </button>
+        )}
+
         {/* Exports */}
         {(["PNG", "JPG", "PDF"] as const).map((fmt) => (
           <button
@@ -545,6 +598,13 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
                       >
                         {item.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                       </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteLayer(item.fabricObj); }}
+                        title="Delete layer"
+                        className="rounded p-0.5 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
                   ) : (
                     <Lock className="h-3 w-3 flex-shrink-0 text-[var(--text-muted)] opacity-30" />
@@ -600,12 +660,33 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
             </p>
           </div>
 
-          {/* Nothing selected */}
+          {/* Nothing selected — show hero image if available */}
           {!selectedObj && (
-            <div className="flex flex-1 items-center justify-center p-6 text-center">
-              <p className="text-xs text-[var(--text-muted)]">
-                Click a layer on the canvas or in the layers list to edit it
-              </p>
+            <div className="flex flex-col gap-3 p-3">
+              {heroImageUrl ? (
+                <>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    Generated image
+                  </p>
+                  <img
+                    src={heroImageUrl}
+                    alt="Generated hero"
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full rounded-lg object-cover"
+                    style={{ aspectRatio: `${width}/${height}` }}
+                  />
+                  <p className="text-[10px] text-[var(--text-muted)]">
+                    Select a layer to edit its properties
+                  </p>
+                </>
+              ) : (
+                <div className="flex flex-1 items-center justify-center py-10 text-center">
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Click a layer on the canvas or in the layers list to edit it
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -628,9 +709,18 @@ export function PosterCanvas({ layout, layerUrls, backgroundUrl, posterId }: Pos
                   onChange={(e) => updateFontFamily(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
                 >
-                  {GOOGLE_FONTS.map((f) => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
+                  {brandFonts && brandFonts.length > 0 && (
+                    <optgroup label="Brand Fonts">
+                      {brandFonts.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label={brandFonts?.length ? "Other Fonts" : "Fonts"}>
+                    {GOOGLE_FONTS.filter((f) => !brandFonts?.includes(f)).map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </optgroup>
                 </select>
               </PropSection>
 

@@ -5,32 +5,52 @@ interface SpinnerProps {
   className?: string;
 }
 
-const sizeClasses = {
-  sm: "h-4 w-4",
-  md: "h-6 w-6",
-  lg: "h-10 w-10",
+const sizeMap = {
+  sm: 16,
+  md: 24,
+  lg: 40,
 };
 
 export function Spinner({ size = "md", className }: SpinnerProps) {
+  const s = sizeMap[size];
+  const stroke = size === "sm" ? 2.5 : 2;
+  const r = (s / 2) - stroke * 2;
+  const circumference = 2 * Math.PI * r;
+
   return (
     <svg
-      className={cn("animate-spin text-[var(--accent)]", sizeClasses[size], className)}
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
+      width={s}
+      height={s}
+      viewBox={`0 0 ${s} ${s}`}
+      className={cn(className)}
+      style={{
+        animation: "spin-smooth 0.75s linear infinite",
+        color: "var(--accent)",
+      }}
+      aria-label="Loading"
     >
+      {/* Track */}
       <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
+        cx={s / 2}
+        cy={s / 2}
+        r={r}
+        fill="none"
         stroke="currentColor"
-        strokeWidth="4"
+        strokeWidth={stroke}
+        opacity={0.15}
       />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      {/* Arc */}
+      <circle
+        cx={s / 2}
+        cy={s / 2}
+        r={r}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * 0.75}
+        transform={`rotate(-90 ${s / 2} ${s / 2})`}
       />
     </svg>
   );

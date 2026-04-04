@@ -69,3 +69,10 @@ export async function checkQualityAuditLimit(
   const today = new Date().toISOString().slice(0, 10);
   return checkRateLimit(`audit:${userId}:${today}`, 20, 86400);
 }
+
+export async function checkPosterGenerationLimit(
+  userId: string
+): Promise<{ allowed: boolean; remaining: number }> {
+  const today = new Date().toISOString().slice(0, 10);
+  return checkRateLimit(`poster:${userId}:${today}`, 20, 86400);
+}

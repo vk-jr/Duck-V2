@@ -307,6 +307,7 @@ export interface PosterLayout {
     z_order: string[];           // e.g. ["background", "layer_2", "layer_1", "layer_0", "text_layers"]
     layer_defaults: PosterLayerDefault[];
   };
+  brand_fonts?: string[];        // font names used in this poster (from brand guidelines)
 }
 
 // One row from poster_layers table

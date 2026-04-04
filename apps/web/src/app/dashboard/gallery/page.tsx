@@ -27,8 +27,13 @@ export default async function GalleryPage() {
   return (
     <div className="p-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">Gallery</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
+        <h1
+          className="text-2xl font-bold tracking-tight"
+          style={{ color: "var(--text-primary)" }}
+        >
+          Gallery
+        </h1>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
           {images?.length ?? 0} completed generation{images?.length !== 1 ? "s" : ""}
         </p>
       </div>

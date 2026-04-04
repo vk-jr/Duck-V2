@@ -1,4 +1,5 @@
 import type { Job } from "bullmq";
+import { z } from "zod";
 import { supabase, logWorkflow } from "../services/supabase.service";
 import { downloadAndUpload } from "../services/storage.service";
 import {
@@ -11,6 +12,7 @@ import {
   type PosterFormat,
   type PosterLayout,
   type CompositionAnalysis,
+  type BrandGuidelines,
 } from "../pipeline/poster-pipeline";
 import { logger } from "../logger";
 
@@ -22,6 +24,15 @@ interface PosterGenerationJobData {
   format: PosterFormat;
   referenceImageUrl?: string;
 }
+
+const PosterJobSchema = z.object({
+  posterId: z.string().uuid(),
+  userId: z.string().uuid(),
+  brandId: z.string().uuid(),
+  prompt: z.string().min(1).max(500),
+  format: z.enum(["square", "portrait_a4", "landscape_16_9", "story_9_16"]),
+  referenceImageUrl: z.string().url().optional(),
+});
 
 const POSTER_DIMENSIONS: Record<PosterFormat, { width: number; height: number }> = {
   square:         { width: 1080, height: 1080 },
@@ -40,7 +51,11 @@ async function setStage(posterId: string, stage: string): Promise<void> {
 export async function processPosterGeneration(
   job: Job<PosterGenerationJobData>
 ): Promise<void> {
-  const { posterId, userId, brandId, prompt, format, referenceImageUrl } = job.data;
+  const parsed = PosterJobSchema.safeParse(job.data);
+  if (!parsed.success) {
+    throw new Error(`Invalid job payload: ${parsed.error.errors[0].message}`);
+  }
+  const { posterId, userId, brandId, prompt, format, referenceImageUrl } = parsed.data;
   const logStart = Date.now();
   const isRetry = job.attemptsMade > 0;
 
@@ -73,10 +88,10 @@ export async function processPosterGeneration(
       .update({ status: "processing", started_at: new Date().toISOString() })
       .eq("poster_id", posterId);
 
-    // Fetch brand
+    // Fetch brand — system_prompt for image generation, brand_guidelines for fonts + colors
     const { data: brand, error: brandError } = await supabase
       .from("brands")
-      .select("system_prompt")
+      .select("system_prompt, brand_guidelines")
       .eq("id", brandId)
       .single();
 
@@ -85,6 +100,7 @@ export async function processPosterGeneration(
     }
 
     const brandSystemPrompt = brand.system_prompt ?? "";
+    const brandGuidelines = (brand.brand_guidelines ?? null) as BrandGuidelines | null;
     const dimensions = POSTER_DIMENSIONS[format];
 
     // ── Read checkpoint state ────────────────────────────────
@@ -114,6 +130,7 @@ export async function processPosterGeneration(
       const imagePrompt = await buildHeroImagePrompt(
         prompt,
         brandSystemPrompt,
+        brandGuidelines,
         referenceImageUrl
       );
       const replicateUrl = await generateHeroImage(
@@ -180,6 +197,7 @@ export async function processPosterGeneration(
         prompt,
         composition,
         brandSystemPrompt,
+        brandGuidelines,
         { ...dimensions, format },
         layerUrls.length
       );

@@ -18,22 +18,43 @@ export function ThemeToggle() {
   useEffect(() => setMounted(true), []);
 
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-1">
-      {themes.map(({ value, icon: Icon, label }) => (
-        <button
-          key={value}
-          onClick={() => setTheme(value)}
-          title={label}
-          className={cn(
-            "rounded-md p-1.5 transition-colors",
-            mounted && theme === value
-              ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-              : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-          )}
-        >
-          <Icon className="h-3.5 w-3.5" />
-        </button>
-      ))}
+    <div
+      className="flex items-center gap-0.5 rounded-lg p-1"
+      style={{
+        background: "var(--surface-2)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      {themes.map(({ value, icon: Icon, label }) => {
+        const active = mounted && theme === value;
+        return (
+          <button
+            key={value}
+            onClick={() => setTheme(value)}
+            title={label}
+            className={cn(
+              "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all duration-150",
+              active
+                ? "shadow-sm"
+                : "hover:text-[var(--text-primary)]"
+            )}
+            style={
+              active
+                ? {
+                    background: "var(--surface-1)",
+                    color: "var(--accent)",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }
+                : { color: "var(--text-subtle)" }
+            }
+          >
+            <span className="flex items-center justify-center gap-1">
+              <Icon className="h-3 w-3" />
+              <span className="hidden sm:inline">{label}</span>
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

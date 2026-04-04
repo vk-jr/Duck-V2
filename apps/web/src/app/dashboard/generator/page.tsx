@@ -17,9 +17,14 @@ export default async function GeneratorPage() {
 
   return (
     <div className="flex h-full flex-col p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-[var(--text-primary)]">Generator</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
+      <div className="mb-6">
+        <h1
+          className="text-2xl font-bold tracking-tight"
+          style={{ color: "var(--text-primary)" }}
+        >
+          Generator
+        </h1>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
           Generate brand-consistent images with AI
         </p>
       </div>

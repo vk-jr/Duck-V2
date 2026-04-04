@@ -29,37 +29,51 @@ function validateEnv(): void {
   for (const key of REQUIRED_ENV_VARS) {
     if (!process.env[key]) {
       missing.push(key);
-    } else {
-      logger.info(`Env check: ${key} ✓`);
     }
   }
 
   if (missing.length > 0) {
-    logger.error("Missing required environment variables", { missing });
+    logger.error(`Missing ${missing.length} required environment variable(s) — check your .env`);
     process.exit(1);
   }
 }
 
 // ── Concurrency Settings ──────────────────────────────────────
 const IMAGE_GEN_CONCURRENCY = parseInt(
-  process.env.IMAGE_GEN_CONCURRENCY ?? "5",
+  process.env.IMAGE_GEN_CONCURRENCY ?? "3", // was 5 — Replicate rate-limits anyway
   10
 );
-const BRAND_CREATION_CONCURRENCY = 3;
-const QUALITY_CHECK_CONCURRENCY = 3;
+const BRAND_CREATION_CONCURRENCY = 2; // was 3
+const QUALITY_CHECK_CONCURRENCY = 2;  // was 3
 const POSTER_CONCURRENCY = parseInt(
   process.env.POSTER_CONCURRENCY ?? "2",
   10
 );
 
+// ── Shared Worker Options ─────────────────────────────────────
+// lockDuration: how long a job lock is held before BullMQ considers the worker stalled.
+//   Default 30 s → lock renewed every 15 s per active concurrency slot.
+//   120 s → renewed every 60 s → 4× fewer lock-renewal Redis commands.
+// stalledInterval: how often to scan for stalled jobs.
+//   Default 30 s → 60 s halves those scans.
+// drainDelay: ms to wait after finding no jobs before re-polling.
+//   Default 5 ms → 300 ms smooths out burst polling at the end of a job batch.
+const SHARED_WORKER_OPTIONS = {
+  lockDuration: 120_000,
+  stalledInterval: 60_000,
+  maxStalledCount: 2,
+  drainDelay: 300,
+} as const;
+
 // ── Start Workers ─────────────────────────────────────────────
-function startWorkers(): void {
+function startWorkers(): Worker[] {
   const imageGenerationWorker = new Worker(
     "image-generation",
     processImageGeneration,
     {
       connection: redis,
       concurrency: IMAGE_GEN_CONCURRENCY,
+      ...SHARED_WORKER_OPTIONS,
     }
   );
 
@@ -69,6 +83,7 @@ function startWorkers(): void {
     {
       connection: redis,
       concurrency: BRAND_CREATION_CONCURRENCY,
+      ...SHARED_WORKER_OPTIONS,
     }
   );
 
@@ -78,6 +93,7 @@ function startWorkers(): void {
     {
       connection: redis,
       concurrency: QUALITY_CHECK_CONCURRENCY,
+      ...SHARED_WORKER_OPTIONS,
     }
   );
 
@@ -87,6 +103,7 @@ function startWorkers(): void {
     {
       connection: redis,
       concurrency: POSTER_CONCURRENCY,
+      ...SHARED_WORKER_OPTIONS,
     }
   );
 
@@ -123,19 +140,22 @@ function startWorkers(): void {
       "poster-generation": { concurrency: POSTER_CONCURRENCY },
     },
   });
+
+  return [imageGenerationWorker, brandCreationWorker, qualityCheckWorker, posterGenerationWorker];
 }
-
-// ── Graceful Shutdown ─────────────────────────────────────────
-process.on("SIGTERM", () => {
-  logger.info("SIGTERM received — shutting down gracefully");
-  process.exit(0);
-});
-
-process.on("SIGINT", () => {
-  logger.info("SIGINT received — shutting down gracefully");
-  process.exit(0);
-});
 
 // ── Bootstrap ─────────────────────────────────────────────────
 validateEnv();
-startWorkers();
+const workers = startWorkers();
+
+// ── Graceful Shutdown ─────────────────────────────────────────
+// Close workers first so in-flight jobs can finish (or checkpoint) before exit.
+async function shutdown(signal: string) {
+  logger.info(`${signal} received — closing workers`);
+  await Promise.allSettled(workers.map((w) => w.close()));
+  logger.info("All workers closed — exiting");
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT",  () => shutdown("SIGINT"));

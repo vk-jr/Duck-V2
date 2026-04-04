@@ -11,7 +11,7 @@ import { ImageCard } from "@/components/ui/image-card";
 import { Spinner } from "@/components/ui/spinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { parseImageUrls } from "@/lib/utils";
-import { Wand2, ImageIcon } from "lucide-react";
+import { Wand2, ImageIcon, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 interface Brand {
@@ -29,16 +29,12 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
   const [isPending, startTransition] = useTransition();
   const channelRef = useRef<ReturnType<typeof createClient>["channel"] | null>(null);
 
-  // Subscribe to realtime when we have a generatedImageId and add a polling fallback
   useEffect(() => {
     if (!generatedImageId) return;
 
     const supabase = createClient();
-    
-    // Declare interval id so both realtime and polling can clear it
     let intervalId: ReturnType<typeof setInterval>;
 
-    // 1. Realtime subscription
     const channel = supabase
       .channel(`gen-${generatedImageId}`)
       .on(
@@ -67,7 +63,6 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
       )
       .subscribe();
 
-    // 2. Polling fallback (every 3 seconds) incase realtime drops during long generations
     intervalId = setInterval(async () => {
       const { data, error } = await supabase
         .from("generated_images")
@@ -76,7 +71,6 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
         .single();
 
       if (!error && data) {
-        // Only update state if it's practically finished or we're somehow out of sync
         if (data.status === "completed" && data.image_url) {
           setGenStatus("completed");
           setImageUrls(parseImageUrls(data.image_url));
@@ -88,7 +82,6 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
           clearInterval(intervalId);
           supabase.removeChannel(channel);
         } else {
-          // just sync the pending/generating status in case we missed it
           setGenStatus(data.status as typeof genStatus);
         }
       }
@@ -123,13 +116,18 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
 
   if (!brands.length) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-        <div className="rounded-full bg-[var(--surface-2)] p-5">
-          <Wand2 className="h-8 w-8 text-[var(--text-muted)]" />
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+        >
+          <Wand2 className="h-8 w-8" style={{ color: "var(--text-subtle)" }} />
         </div>
         <div>
-          <p className="font-medium text-[var(--text-primary)]">No ready brands</p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
+          <p className="font-semibold" style={{ color: "var(--text-primary)" }}>
+            No ready brands
+          </p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Create and train a brand first before generating images
           </p>
         </div>
@@ -140,18 +138,27 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
     );
   }
 
+  const isGenerating = isPending || genStatus === "generating" || genStatus === "pending";
+
   return (
-    <div className="flex flex-1 gap-8 min-h-0">
+    <div className="flex flex-1 gap-6 min-h-0">
       {/* Left panel — controls */}
-      <div className="w-80 flex-shrink-0">
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      <div
+        className="w-[300px] flex-shrink-0 rounded-xl p-5"
+        style={{
+          border: "1px solid var(--border)",
+          background: "var(--surface-1)",
+          boxShadow: "var(--card-shadow)",
+        }}
+      >
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <FileUpload
-            label="Optional: Upload a product or reference image"
+            label="Reference image (optional)"
             multiple={false}
             maxFiles={1}
             maxSizeBytes={10 * 1024 * 1024}
             onFilesChange={(files) => setInputFile(files[0] ?? null)}
-            hint="When provided, FLUX Kontext will reimagine this image in your brand's style"
+            hint="FLUX Kontext will reimagine this image in your brand's style"
           />
 
           <Textarea
@@ -170,52 +177,61 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
             required
           />
 
-          <Select
-            label="Number of images"
-            name="imageCount"
-            options={[
-              { value: "1", label: "1 image" },
-              { value: "2", label: "2 images" },
-              { value: "4", label: "4 images" },
-            ]}
-            defaultValue="1"
-          />
-
-          <Select
-            label="Aspect ratio"
-            name="aspectRatio"
-            options={[
-              { value: "1:1", label: "Square (1:1)" },
-              { value: "16:9", label: "Landscape (16:9)" },
-              { value: "9:16", label: "Portrait (9:16)" },
-            ]}
-            defaultValue="1:1"
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Images"
+              name="imageCount"
+              options={[
+                { value: "1", label: "1 image" },
+                { value: "2", label: "2 images" },
+                { value: "4", label: "4 images" },
+              ]}
+              defaultValue="1"
+            />
+            <Select
+              label="Ratio"
+              name="aspectRatio"
+              options={[
+                { value: "1:1", label: "Square 1:1" },
+                { value: "16:9", label: "Wide 16:9" },
+                { value: "9:16", label: "Tall 9:16" },
+              ]}
+              defaultValue="1:1"
+            />
+          </div>
 
           <Select
             label="Resolution"
             name="resolution"
             options={[
-              { value: "1K", label: "1K (1024px)" },
-              { value: "2K", label: "2K (2048px)" },
-              { value: "4K", label: "4K (3840px)" },
+              { value: "1K", label: "1K — 1024px" },
+              { value: "2K", label: "2K — 2048px" },
+              { value: "4K", label: "4K — 3840px" },
             ]}
             defaultValue="1K"
           />
 
           {error && (
-            <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            <div
+              className="rounded-lg px-3 py-2.5 text-sm"
+              style={{
+                background: "color-mix(in srgb, var(--status-error) 8%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--status-error) 25%, transparent)",
+                color: "var(--status-error)",
+              }}
+            >
               {error}
-            </p>
+            </div>
           )}
 
           <Button
             type="submit"
-            loading={isPending || genStatus === "generating" || genStatus === "pending"}
-            className="w-full"
+            loading={isGenerating}
+            className="w-full mt-1"
+            size="lg"
           >
-            <Wand2 className="h-4 w-4" />
-            {genStatus === "generating" ? "Generating…" : "Generate"}
+            {!isGenerating && <Wand2 className="h-4 w-4" />}
+            {isGenerating ? "Generating…" : "Generate"}
           </Button>
         </form>
       </div>
@@ -225,20 +241,79 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
         <Card className="h-full">
           <CardContent className="flex h-full items-center justify-center p-6">
             {genStatus === "idle" && !imageUrls.length && (
-              <div className="flex flex-col items-center gap-3 text-center text-[var(--text-muted)]">
-                <ImageIcon className="h-12 w-12 opacity-30" />
-                <p className="text-sm">Your generated images will appear here</p>
+              <div className="flex flex-col items-center gap-4 text-center">
+                <div
+                  className="rounded-2xl p-6"
+                  style={{
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <ImageIcon
+                    className="h-10 w-10"
+                    style={{ color: "var(--text-subtle)" }}
+                  />
+                </div>
+                <div>
+                  <p
+                    className="font-medium"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    Your generated images will appear here
+                  </p>
+                  <p
+                    className="mt-1 text-sm"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Fill in the form on the left and hit Generate
+                  </p>
+                </div>
               </div>
             )}
 
-            {(genStatus === "pending" || genStatus === "generating") && (
-              <div className="flex flex-col items-center gap-4">
-                <Spinner size="lg" />
+            {isGenerating && (
+              <div className="flex flex-col items-center gap-5">
+                <div className="relative">
+                  <div
+                    className="rounded-full p-5"
+                    style={{
+                      background: "var(--accent-subtle)",
+                      border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)",
+                    }}
+                  >
+                    <Sparkles
+                      className="h-8 w-8"
+                      style={{
+                        color: "var(--accent)",
+                        animation: "dot-pulse 2s ease-in-out infinite",
+                      }}
+                    />
+                  </div>
+                  <div className="absolute -right-1 -top-1">
+                    <Spinner size="sm" />
+                  </div>
+                </div>
                 <div className="text-center">
-                  <p className="font-medium text-[var(--text-primary)]">Generating…</p>
-                  <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  <p className="font-semibold" style={{ color: "var(--text-primary)" }}>
+                    Generating your images
+                  </p>
+                  <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
                     This usually takes 15–45 seconds
                   </p>
+                </div>
+                {/* Progress steps */}
+                <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-subtle)" }}>
+                  {["Picking references", "Building prompt", "Rendering"].map((step, i) => (
+                    <span key={step} className="flex items-center gap-2">
+                      {i > 0 && <span style={{ color: "var(--border-strong)" }}>→</span>}
+                      <span
+                        className="flex items-center gap-1"
+                        style={{ color: i === 1 ? "var(--accent)" : "var(--text-subtle)" }}
+                      >
+                        {step}
+                      </span>
+                    </span>
+                  ))}
                 </div>
               </div>
             )}
@@ -248,8 +323,6 @@ export function GeneratorClient({ brands }: { brands: Brand[] }) {
                 className={`grid h-full w-full gap-3 ${
                   imageUrls.length === 1
                     ? "grid-cols-1"
-                    : imageUrls.length === 2
-                    ? "grid-cols-2"
                     : "grid-cols-2"
                 }`}
               >

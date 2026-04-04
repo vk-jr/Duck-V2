@@ -10,12 +10,13 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**.supabase.co",
+        hostname: "*.supabase.co",       // single-level wildcard — no sub-subdomains
         pathname: "/storage/v1/object/**",
       },
       {
         protocol: "https",
         hostname: "replicate.delivery",
+        pathname: "/**",
       },
     ],
   },

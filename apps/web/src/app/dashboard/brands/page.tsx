@@ -25,8 +25,13 @@ export default async function BrandsPage() {
     <div className="p-8">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Brands</h1>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
+          <h1
+            className="text-2xl font-bold tracking-tight"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Brands
+          </h1>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             {brands?.length ?? 0} brand{brands?.length !== 1 ? "s" : ""}
           </p>
         </div>
